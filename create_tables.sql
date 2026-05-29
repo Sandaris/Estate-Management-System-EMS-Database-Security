@@ -51,7 +51,6 @@ CREATE TABLE Properties (
         CONSTRAINT CK_Properties_Status CHECK (Status IN ('Available','Sold','Rented','Under Maintenance','Reserved')),
     IsActive        BIT             NOT NULL        DEFAULT 1,  -- soft-delete flag
     CreatedDate     DATETIME        NOT NULL        DEFAULT GETDATE(),
-    ModifiedDate    DATETIME        NULL
 );
 GO
 SELECT * FROM Properties
@@ -72,7 +71,6 @@ CREATE TABLE Clients (
         CONSTRAINT CK_Clients_Type CHECK (ClientType IN ('Individual','Corporate')),
     IsActive        BIT             NOT NULL        DEFAULT 1,
     RegisteredDate  DATETIME        NOT NULL        DEFAULT GETDATE(),
-    ModifiedDate    DATETIME        NULL
 );
 GO
 SELECT * FROM Clients
@@ -91,7 +89,6 @@ CREATE TABLE Agents (
         CONSTRAINT CK_Agents_CommRate CHECK (CommissionRate BETWEEN 0 AND 100),
     IsActive        BIT             NOT NULL        DEFAULT 1,
     JoinedDate      DATETIME        NOT NULL        DEFAULT GETDATE(),
-    ModifiedDate    DATETIME        NULL
 );
 GO
 SELECT * FROM Agents
@@ -188,7 +185,6 @@ CREATE TABLE SystemUsers (
         )),
     IsActive        BIT             NOT NULL        DEFAULT 1,
     CreatedDate     DATETIME        NOT NULL        DEFAULT GETDATE(),
-    LastModified    DATETIME        NULL
 );
 GO
 SELECT * FROM SystemUsers
@@ -922,34 +918,4 @@ VALUES
 ('Navin Raj', '019-7766123', 'General Maintenance', 0, '2023-11-19');
 
 
---===============================================
--- DROPPING ModifiedDate and LastModified
---==============================================
-
-ALTER TABLE Properties
-DROP COLUMN ModifiedDate;
-
-ALTER TABLE Clients
-DROP COLUMN ModifiedDate;
-
-ALTER TABLE Agents
-DROP COLUMN ModifiedDate;
-
-ALTER TABLE SystemUsers
-DROP COLUMN LastModified;
-
-SELECT * FROM Properties
-SELECT * FROM Clients
-SELECT * FROM Agents
-SELECT * FROM Transactions
-SELECT * FROM MaintenanceRequests
-SELECT * FROM Departments
-SELECT * FROM SystemUsers
-SELECT * FROM UserLoginLog
-SELECT * FROM AuditLog
-SELECT * FROM LeaseAgreements
-SELECT * FROM CommissionPayments
-SELECT * FROM MaintenanceStaff
-SELECT * FROM Notifications
-====================================================
 

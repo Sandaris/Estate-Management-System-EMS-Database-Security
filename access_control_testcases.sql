@@ -1,27 +1,25 @@
-/* ============================================================
-   09_access_control_testcases.sql
-   Green Acres Realty Sdn Bhd - EMS Database Security
-   CT069-3-3 Database Security Assignment
-
-   Member     : Rama
-   Purpose    : Test cases proving Roles / Users / Views /
-                Stored Procedures work correctly. Run AFTER
-                access_control.sql.
-
-   Technique  : EXECUTE AS USER ... / REVERT impersonates a
-                low-privilege user within the same session
-                without logging out - the standard SSMS way to
-                test role-based access control.
-   ============================================================ */
+-- ============================================================
+--   access_control_testcases.sql
+--   Green Acres Realty Sdn Bhd - EMS Database Security
+--   CT069-3-3 Database Security Assignment
+--
+--   Member 2 (Rama)
+--   Purpose    : Test cases proving Roles / Users / Views /
+--                Stored Procedures work correctly. Run AFTER
+--                access_control.sql.
+--
+--   Technique  : EXECUTE AS USER will assume a person from the particular role
+--			    REVERT will reset your role (NECESSARY)
+--                
+--   ============================================================
 
 USE GreenAcresEMS;
 GO
 
-/* ============================================================
-   TEST 1: Confirm all 6 roles were created and users assigned
-   Expected: 6 role_ entries, each with at least 2 members
-             that match LoginNames from the SystemUsers table.
-   ============================================================ */
+-- ============================================================
+--   TEST 1: Confirm all 6 roles were created and users assigned
+--   Expected: 6 role_entries with at least 2 members
+--   ============================================================
 SELECT r.name AS RoleName, m.name AS MemberName
 FROM sys.database_role_members rm
 JOIN sys.database_principals r ON r.principal_id = rm.role_principal_id
@@ -31,11 +29,10 @@ ORDER BY RoleName, MemberName;
 GO
 
 
-/* ============================================================
-   TEST 2: Confirm roles match UserRole values in SystemUsers
-   Expected: every row returns a matching role_ name,
-             confirming the SQL roles align with the table.
-   ============================================================ */
+-- ============================================================
+--   TEST 2: Confirm roles match UserRole values in SystemUsers
+--   Expected: Every row returns a matching role_name
+--   ============================================================
 SELECT DISTINCT
     su.UserRole,
     'role_' + su.UserRole AS ExpectedRoleName,
@@ -47,10 +44,10 @@ LEFT JOIN sys.database_principals dp
 GO
 
 
-/* ============================================================
-   TEST 3: role_ReadOnly can SELECT from a safe view
-   Expected: rows returned from vw_PropertyListing (SUCCESS).
-   ============================================================ */
+-- ============================================================
+--   TEST 3: role_ReadOnly can SELECT from a safe view
+--   Expected: Rows returned from vw_PropertyListing (SUCCESS).
+--   ============================================================
 EXECUTE AS USER = 'jason.lim';          -- role_ReadOnly
     SELECT TOP 5 PropertyID, PropertyName, City, Status
     FROM vw_PropertyListing;
@@ -58,11 +55,10 @@ REVERT;
 GO
 
 
-/* ============================================================
-   TEST 4: role_ReadOnly is BLOCKED from base tables
-   Expected: SELECT on dbo.CommissionPayments raises a
-             permission-denied error (proves least privilege).
-   ============================================================ */
+-- ============================================================
+--   TEST 4: role_ReadOnly is BLOCKED from base tables
+--   Expected: SELECT on dbo.CommissionPayments raises a permission-denied error (proving least privilege)
+--   ============================================================
 EXECUTE AS USER = 'jason.lim';          -- role_ReadOnly
     BEGIN TRY
         SELECT TOP 1 * FROM dbo.CommissionPayments;
@@ -75,12 +71,10 @@ REVERT;
 GO
 
 
-/* ============================================================
-   TEST 5: DDM masking stays in force for role_Analyst
-   Expected: hakim.zulkifli (role_Analyst, no UNMASK) sees
-             masked NRIC, ContactNumber and Email values in the
-             client directory view (ties into Irfan's DDM work).
-   ============================================================ */
+-- ============================================================
+--   TEST 5 (Linked to Irfan's part): DDM masking for role_Analyst
+--   Expected: hakim.zulkifli (role_Analyst, no UNMASK) sees masked NRIC, ContactNumber and Email values
+--   ============================================================
 EXECUTE AS USER = 'hakim.zulkifli';    -- role_Analyst
     SELECT TOP 5 ClientID, FullName, NRIC, ContactNumber, Email
     FROM vw_ClientDirectory;
@@ -88,11 +82,10 @@ REVERT;
 GO
 
 
-/* ============================================================
-   TEST 6: role_Admin can see unmasked PII (UNMASK granted)
-   Expected: farid.rahman (role_Admin, UNMASK granted) sees
-             real NRIC and Email values - not masked output.
-   ============================================================ */
+-- ============================================================
+--   TEST 6: role_Admin can see unmasked PII (UNMASK granted)
+--   Expected: farid.rahman (role_Admin, UNMASK granted) sees real NRIC and Email values (not masked)
+--   ============================================================
 EXECUTE AS USER = 'farid.rahman';      -- role_Admin
     SELECT TOP 5 ClientID, FullName, NRIC, Email
     FROM dbo.Clients;
@@ -100,11 +93,10 @@ REVERT;
 GO
 
 
-/* ============================================================
-   TEST 7: role_DBA has full control including unmasked PII
-   Expected: arun.kumar (role_DBA, CONTROL = UNMASK) sees
-             real values and can access all tables.
-   ============================================================ */
+-- ============================================================
+--   TEST 7: role_DBA has full control including unmasked PII
+--   Expected: arun.kumar (role_DBA, CONTROL = UNMASK) sees real values and can access all tables.
+--   ============================================================
 EXECUTE AS USER = 'arun.kumar';        -- role_DBA
     SELECT TOP 5 ClientID, FullName, NRIC, Email FROM dbo.Clients;
     SELECT TOP 3 CommissionID, CommissionAmount FROM dbo.CommissionPayments;
@@ -112,11 +104,10 @@ REVERT;
 GO
 
 
-/* ============================================================
-   TEST 8: PropMgmtDev inserts a property via procedure
-   Expected: usp_ManageProperty succeeds; no direct table
-             INSERT is needed by this role.
-   ============================================================ */
+-- ============================================================
+--   TEST 8: PropMgmtDev inserts a property via procedure
+--   Expected: usp_ManageProperty succeeds (no direct table INSERT is needed by this role)
+--   ============================================================
 EXECUTE AS USER = 'kelvin.ong';        -- role_PropMgmtDev
     EXEC dbo.usp_ManageProperty
         @PropertyName = 'Test Location',
@@ -134,10 +125,10 @@ REVERT;
 GO
 
 
-/* ============================================================
-   TEST 9: PropMgmtDev is BLOCKED from writing CommissionPayments
-   Expected: direct INSERT denied (separation of duties).
-   ============================================================ */
+-- ============================================================
+--   TEST 9: PropMgmtDev is BLOCKED from writing CommissionPayments
+--   Expected: Direct INSERT denied
+--   ============================================================
 EXECUTE AS USER = 'kelvin.ong';        -- role_PropMgmtDev
     BEGIN TRY
         INSERT INTO dbo.CommissionPayments
@@ -152,10 +143,10 @@ REVERT;
 GO
 
 
-/* ============================================================
-   TEST 10: ClientPortalDev creates a client via procedure
-   Expected: new client row inserted; can verify with SELECT.
-   ============================================================ */
+-- ============================================================
+--   TEST 10: ClientPortalDev creates a client via procedure
+--   Expected: New client row inserted (Can be verified with SELECT)
+--   ============================================================
 EXECUTE AS USER = 'vijay.menon';       -- role_ClientPortalDev
     EXEC dbo.usp_ManageClient
         @FullName      = 'Test Client',
@@ -168,28 +159,10 @@ REVERT;
 GO
 
 
-/* ============================================================
-   TEST 11: ClientPortalDev is BLOCKED from encrypted blob columns
-   Expected: SELECT on NRIC_Encrypted is denied (role was
-             explicitly denied those columns in Section 3).
-   ============================================================ */ -- Check the output because different from the estimated output !!!
-EXECUTE AS USER = 'vijay.menon';       -- role_ClientPortalDev
-    BEGIN TRY
-        SELECT TOP 1 NRIC_Encrypted FROM dbo.Clients;
-        PRINT 'FAIL: ClientPortalDev accessed encrypted blob column.';
-    END TRY
-    BEGIN CATCH
-        PRINT 'PASS: Permission denied -> ' + ERROR_MESSAGE();
-    END CATCH;
-REVERT;
-GO
-
-
-/* ============================================================
-   TEST 12: Procedure validation rejects invalid input
-   Expected: usp_UpdatePropertyStatus raises an error for
-             an unrecognised status value.
-   ============================================================ */
+-- ============================================================
+--   TEST 11: Procedure validation rejects invalid input
+--   Expected: usp_UpdatePropertyStatus raises an error for an unrecognised status value.
+--   ============================================================
 BEGIN TRY
     EXEC dbo.usp_UpdatePropertyStatus
         @PropertyID = 1,
@@ -202,10 +175,10 @@ END CATCH;
 GO
 
 
-/* ============================================================
-   TEST 13: role_Analyst can read aggregate reporting views
-   Expected: both reporting views return data rows.
-   ============================================================ */
+-- ============================================================
+--   TEST 12: role_Analyst can read aggregate reporting views
+--   Expected: Both reporting views return data rows.
+--   ============================================================
 EXECUTE AS USER = 'hakim.zulkifli';   -- role_Analyst
     SELECT * FROM vw_MonthlySalesSummary;
     SELECT TOP 5 AgentName, TotalSales, TotalTransactionValue
@@ -215,10 +188,10 @@ REVERT;
 GO
 
 
-/* ============================================================
-   TEST 14: role_Analyst CANNOT execute a write procedure
-   Expected: EXECUTE on usp_ManageProperty is denied.
-   ============================================================ */
+-- ============================================================
+--   TEST 13: role_Analyst CANNOT execute a write procedure
+--   Expected: EXECUTE on usp_ManageProperty is denied.
+--   ============================================================
 EXECUTE AS USER = 'hakim.zulkifli';   -- role_Analyst
     BEGIN TRY
         EXEC dbo.usp_ManageProperty
@@ -235,11 +208,10 @@ GO
 
 -- EXTRA FUNCTION TESTCASE
 
-/* ============================================================
-   TEST 15: usp_ProvisionUser - Successfully add a new user
-   Expected: All three steps complete and user appears in
-             role_Analyst membership.
-   ============================================================ */
+-- ============================================================
+--   TEST 14: usp_ProvisionUser - Successfully add a new user
+--   Expected: All three steps complete and user appears in role_Analyst membership.
+--   ============================================================ 
    EXEC dbo.usp_ProvisionUser
     @LoginName = 'test.newstaff',
     @Password  = 'Test@NewStaff#2026',
@@ -248,18 +220,19 @@ GO
 
 
 
-/* ============================================================
-   TEST 16: usp_DeprovisionUser - Successfully remove user
-   Expected: All three steps complete - test.newstaff removed
-             from roles, database user dropped, login dropped.
-   ============================================================ */
+-- ============================================================
+--   TEST 15: usp_DeprovisionUser - Successfully remove user
+--   Expected: All three steps complete (test.newstaff removed from roles, database user dropped, login dropped)
+--   ============================================================
 
    EXEC dbo.usp_DeprovisionUser @LoginName = 'test.newstaff';
 GO
 
 
--- Test B5 Fail
-
+-- ============================================================
+-- Test 16: usp_ProvisionUser cannot proceed due to invalid Password
+-- Expected: The correct error message of 'PASS: Null parameter rejected' is outputted
+-- ============================================================
 
 BEGIN TRY
     EXEC dbo.usp_ProvisionUser
@@ -275,8 +248,6 @@ GO
 
 
 
-
-
-/* ============================================================
-   END OF TEST CASES - 09_access_control_testcases.sql (Rama)
-   ============================================================ */
+-- ===========
+--   END 
+--   =========

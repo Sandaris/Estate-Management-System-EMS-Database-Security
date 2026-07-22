@@ -3,7 +3,7 @@
 -- Green Acres Realty Sdn Bhd
 -- Estate Management System (EMS) - Full Database Schema
 -- CT069-3-3 Database Security Assignment
--- =========================================================                ===
+-- =========================================================        
 -- Covers:
 --   * All original tables (Properties, Clients, Agents,
 --     Transactions, MaintenanceRequests) - enhanced
@@ -1225,12 +1225,6 @@ GRANT SELECT ON dbo.Agents              TO role_Analyst;
 GRANT SELECT ON dbo.Departments         TO role_Analyst;
 
 
-----------------------------------------------------------------
--- 3.6  ReadOnly: No base-table grants at all (Access is only through safe views)
-----------------------------------------------------------------
-
--- No base-table grants so skip
-GO
 
 
 -- ============================================================
@@ -1849,7 +1843,7 @@ GO
 
 -- =============================
 --   EXTRA FUNCTIONS/ STORED PROCEDURES
---   ===========================
+-- ===========================
 
 ----------------------------------------------------------------
 -- 5.11: usp_ProvisionUser (User Provisioning - Add new user access) 
@@ -2016,13 +2010,6 @@ SELECT name FROM sys.views WHERE name LIKE 'vw_%';
 
 -- Procedures created
 SELECT name FROM sys.procedures WHERE name LIKE 'usp_%';
-
-
-
-
--- =====
--- END
--- =====
 
 
 
@@ -2755,4 +2742,499 @@ BEGIN
             @LoginName AS LoginName;
     END;
 END;
+GO
+
+
+/* ============================================================
+   Member 4
+   Triggers
+   Green Acres Realty Sdn Bhd - EMS Database Security
+   CT069-3-3 Database Security Assignment
+
+   Purpose    : Triggers - both AUDITING and OPERATIONAL.
+
+   Scope:
+   SECTION A - Auditing triggers
+       One combined AFTER INSERT/UPDATE/DELETE trigger per
+       sensitive table. Every DML change is written to
+       dbo.AuditLog as a before/after JSON snapshot.
+
+   SECTION B - Operational triggers
+       Business-process automation that keeps related tables in
+       sync without relying on the application layer to remember
+       every step (property status sync, lease expiry handling,
+       maintenance completion timestamps, auto commission calc).
+   ============================================================ */
+
+USE GreenAcresEMS;
+GO
+
+
+/* ============================================================
+   SECTION A: AUDITING TRIGGERS
+   ============================================================ */
+
+-- ------------------------------------------------------------
+-- A1. Clients
+-- ------------------------------------------------------------
+CREATE OR ALTER TRIGGER trg_Clients_Audit
+ON dbo.Clients
+WITH EXECUTE AS OWNER          
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- 1. UPDATE Condition
+    IF EXISTS (SELECT 1 FROM inserted) AND EXISTS (SELECT 1 FROM deleted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, OldValues, NewValues, ApplicationName, HostName)
+        SELECT 'Clients', 'UPDATE', CAST(i.ClientID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               (SELECT i.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM inserted i
+        JOIN deleted d ON d.ClientID = i.ClientID;
+    END
+    -- 2. INSERT Condition
+    ELSE IF EXISTS (SELECT 1 FROM inserted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, NewValues, ApplicationName, HostName)
+        SELECT 'Clients', 'INSERT', CAST(i.ClientID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT i.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM inserted i;
+    END
+    -- 3. DELETE Condition
+    ELSE IF EXISTS (SELECT 1 FROM deleted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, OldValues, ApplicationName, HostName)
+        SELECT 'Clients', 'DELETE', CAST(d.ClientID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM deleted d;
+    END
+END;
+GO
+
+-- ------------------------------------------------------------
+-- A2. Agents
+-- ------------------------------------------------------------
+CREATE OR ALTER TRIGGER trg_Agents_Audit
+ON dbo.Agents
+WITH EXECUTE AS OWNER
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (SELECT 1 FROM inserted) AND EXISTS (SELECT 1 FROM deleted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, OldValues, NewValues, ApplicationName, HostName)
+        SELECT 'Agents', 'UPDATE', CAST(i.AgentID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               (SELECT i.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM inserted i
+        JOIN deleted d ON d.AgentID = i.AgentID;
+    END
+    ELSE IF EXISTS (SELECT 1 FROM inserted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, NewValues, ApplicationName, HostName)
+        SELECT 'Agents', 'INSERT', CAST(i.AgentID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT i.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM inserted i;
+    END
+    ELSE IF EXISTS (SELECT 1 FROM deleted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, OldValues, ApplicationName, HostName)
+        SELECT 'Agents', 'DELETE', CAST(d.AgentID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM deleted d;
+    END
+END;
+GO
+
+-- ------------------------------------------------------------
+-- A3. Transactions
+-- ------------------------------------------------------------
+CREATE OR ALTER TRIGGER trg_Transactions_Audit
+ON dbo.Transactions
+WITH EXECUTE AS OWNER
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (SELECT 1 FROM inserted) AND EXISTS (SELECT 1 FROM deleted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, OldValues, NewValues, ApplicationName, HostName)
+        SELECT 'Transactions', 'UPDATE', CAST(i.TransactionID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               (SELECT i.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM inserted i
+        JOIN deleted d ON d.TransactionID = i.TransactionID;
+    END
+    ELSE IF EXISTS (SELECT 1 FROM inserted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, NewValues, ApplicationName, HostName)
+        SELECT 'Transactions', 'INSERT', CAST(i.TransactionID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT i.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM inserted i;
+    END
+    ELSE IF EXISTS (SELECT 1 FROM deleted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, OldValues, ApplicationName, HostName)
+        SELECT 'Transactions', 'DELETE', CAST(d.TransactionID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM deleted d;
+    END
+END;
+GO
+
+-- ------------------------------------------------------------
+-- A4. LeaseAgreements
+-- ------------------------------------------------------------
+CREATE OR ALTER TRIGGER trg_LeaseAgreements_Audit
+ON dbo.LeaseAgreements
+WITH EXECUTE AS OWNER
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (SELECT 1 FROM inserted) AND EXISTS (SELECT 1 FROM deleted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, OldValues, NewValues, ApplicationName, HostName)
+        SELECT 'LeaseAgreements', 'UPDATE', CAST(i.LeaseID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               (SELECT i.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM inserted i
+        JOIN deleted d ON d.LeaseID = i.LeaseID;
+    END
+    ELSE IF EXISTS (SELECT 1 FROM inserted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, NewValues, ApplicationName, HostName)
+        SELECT 'LeaseAgreements', 'INSERT', CAST(i.LeaseID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT i.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM inserted i;
+    END
+    ELSE IF EXISTS (SELECT 1 FROM deleted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, OldValues, ApplicationName, HostName)
+        SELECT 'LeaseAgreements', 'DELETE', CAST(d.LeaseID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM deleted d;
+    END
+END;
+GO
+
+-- ------------------------------------------------------------
+-- A5. CommissionPayments
+-- ------------------------------------------------------------
+CREATE OR ALTER TRIGGER trg_CommissionPayments_Audit
+ON dbo.CommissionPayments
+WITH EXECUTE AS OWNER
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (SELECT 1 FROM inserted) AND EXISTS (SELECT 1 FROM deleted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, OldValues, NewValues, ApplicationName, HostName)
+        SELECT 'CommissionPayments', 'UPDATE', CAST(i.CommissionID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               (SELECT i.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM inserted i
+        JOIN deleted d ON d.CommissionID = i.CommissionID;
+    END
+    ELSE IF EXISTS (SELECT 1 FROM inserted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, NewValues, ApplicationName, HostName)
+        SELECT 'CommissionPayments', 'INSERT', CAST(i.CommissionID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT i.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM inserted i;
+    END
+    ELSE IF EXISTS (SELECT 1 FROM deleted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, OldValues, ApplicationName, HostName)
+        SELECT 'CommissionPayments', 'DELETE', CAST(d.CommissionID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM deleted d;
+    END
+END;
+GO
+
+-- ------------------------------------------------------------
+-- A6. SystemUsers
+-- ------------------------------------------------------------
+CREATE OR ALTER TRIGGER trg_SystemUsers_Audit
+ON dbo.SystemUsers
+WITH EXECUTE AS OWNER
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (SELECT 1 FROM inserted) AND EXISTS (SELECT 1 FROM deleted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, OldValues, NewValues, ApplicationName, HostName)
+        SELECT 'SystemUsers', 'UPDATE', CAST(i.SystemUserID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               (SELECT i.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM inserted i
+        JOIN deleted d ON d.SystemUserID = i.SystemUserID;
+    END
+    ELSE IF EXISTS (SELECT 1 FROM inserted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, NewValues, ApplicationName, HostName)
+        SELECT 'SystemUsers', 'INSERT', CAST(i.SystemUserID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT i.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM inserted i;
+    END
+    ELSE IF EXISTS (SELECT 1 FROM deleted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, OldValues, ApplicationName, HostName)
+        SELECT 'SystemUsers', 'DELETE', CAST(d.SystemUserID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM deleted d;
+    END
+END;
+GO
+
+-- ------------------------------------------------------------
+-- A7. MaintenanceRequests
+-- ------------------------------------------------------------
+CREATE OR ALTER TRIGGER trg_MaintenanceRequests_Audit
+ON dbo.MaintenanceRequests
+WITH EXECUTE AS OWNER
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (SELECT 1 FROM inserted) AND EXISTS (SELECT 1 FROM deleted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, OldValues, NewValues, ApplicationName, HostName)
+        SELECT 'MaintenanceRequests', 'UPDATE', CAST(i.RequestID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               (SELECT i.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM inserted i
+        JOIN deleted d ON d.RequestID = i.RequestID;
+    END
+    ELSE IF EXISTS (SELECT 1 FROM inserted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, NewValues, ApplicationName, HostName)
+        SELECT 'MaintenanceRequests', 'INSERT', CAST(i.RequestID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT i.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM inserted i;
+    END
+    ELSE IF EXISTS (SELECT 1 FROM deleted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, OldValues, ApplicationName, HostName)
+        SELECT 'MaintenanceRequests', 'DELETE', CAST(d.RequestID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM deleted d;
+    END
+END;
+GO
+
+-- ------------------------------------------------------------
+-- A8. Properties
+-- ------------------------------------------------------------
+CREATE OR ALTER TRIGGER trg_Properties_Audit
+ON dbo.Properties
+WITH EXECUTE AS OWNER
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (SELECT 1 FROM inserted) AND EXISTS (SELECT 1 FROM deleted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, OldValues, NewValues, ApplicationName, HostName)
+        SELECT 'Properties', 'UPDATE', CAST(i.PropertyID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               (SELECT i.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM inserted i
+        JOIN deleted d ON d.PropertyID = i.PropertyID;
+    END
+    ELSE IF EXISTS (SELECT 1 FROM inserted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, NewValues, ApplicationName, HostName)
+        SELECT 'Properties', 'INSERT', CAST(i.PropertyID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT i.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM inserted i;
+    END
+    ELSE IF EXISTS (SELECT 1 FROM deleted)
+    BEGIN
+        INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, OldValues, ApplicationName, HostName)
+        SELECT 'Properties', 'DELETE', CAST(d.PropertyID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
+               (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               APP_NAME(), HOST_NAME()
+        FROM deleted d;
+    END
+END;
+GO
+
+
+/* ============================================================
+   SECTION B: OPERATIONAL TRIGGERS
+   ============================================================ */
+
+-- ------------------------------------------------------------
+-- B1. New Transaction -> keep Property.Status in sync
+--     'Sale' closes the property out as Sold; 'Rent' marks it
+--     Rented. Saves every dev team from having to remember to
+--     do this manually in application code.
+-- ------------------------------------------------------------
+CREATE OR ALTER TRIGGER trg_Transactions_UpdatePropertyStatus
+ON dbo.Transactions
+AFTER INSERT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE p
+    SET p.Status = CASE i.TransactionType
+                        WHEN 'Sale' THEN 'Sold'
+                        WHEN 'Rent' THEN 'Rented'
+                        ELSE p.Status
+                   END
+    FROM dbo.Properties p
+    JOIN inserted i ON i.PropertyID = p.PropertyID
+    WHERE i.TransactionType IN ('Sale', 'Rent');
+END;
+GO
+
+-- ------------------------------------------------------------
+-- B2. New Transaction -> auto-generate the CommissionPayments
+--     row using the agent's current CommissionRate (snapshot),
+--     so DBAs/finance don't have to insert it separately.
+-- ------------------------------------------------------------
+CREATE OR ALTER TRIGGER trg_Transactions_AutoCommission
+ON dbo.Transactions
+AFTER INSERT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    INSERT INTO dbo.CommissionPayments (TransactionID, AgentID, CommissionRate, CommissionAmount, PaymentStatus, Remarks)
+    SELECT i.TransactionID,
+           i.AgentID,
+           a.CommissionRate,
+           ROUND(i.Amount * a.CommissionRate / 100.0, 2),
+           'Unpaid',
+           'Auto-generated by trg_Transactions_AutoCommission'
+    FROM inserted i
+    JOIN dbo.Agents a ON a.AgentID = i.AgentID
+    WHERE NOT EXISTS (
+        SELECT 1 FROM dbo.CommissionPayments cp WHERE cp.TransactionID = i.TransactionID
+    );
+END;
+GO
+
+-- ------------------------------------------------------------
+-- B3. Lease ends (Expired/Terminated) -> free up the Property
+--     and notify the client. Only reverts status if no other
+--     Active lease exists on the same property.
+-- ------------------------------------------------------------
+CREATE OR ALTER TRIGGER trg_LeaseAgreements_StatusChange
+ON dbo.LeaseAgreements
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT UPDATE(LeaseStatus)
+        RETURN;
+
+    -- Free up the property when a lease ends, unless another
+    -- active lease is still keeping it occupied.
+    UPDATE p
+    SET p.Status = 'Available'
+    FROM dbo.Properties p
+    JOIN inserted i ON i.PropertyID = p.PropertyID
+    JOIN deleted d ON d.LeaseID = i.LeaseID
+    WHERE i.LeaseStatus IN ('Expired', 'Terminated')
+      AND d.LeaseStatus <> i.LeaseStatus
+      AND p.Status <> 'Sold'
+      AND NOT EXISTS (
+            SELECT 1 FROM dbo.LeaseAgreements la
+            WHERE la.PropertyID = p.PropertyID
+              AND la.LeaseStatus = 'Active'
+              AND la.LeaseID <> i.LeaseID
+      );
+
+    -- Notify the client their lease has ended.
+    INSERT INTO dbo.Notifications (RecipientType, RecipientID, Subject, MessageBody, Channel, RelatedTable, RelatedRecordID)
+    SELECT 'Client', i.ClientID,
+           'Lease ' + i.LeaseStatus,
+           'Your lease agreement (LeaseID ' + CAST(i.LeaseID AS NVARCHAR(20)) + ') is now ' + i.LeaseStatus + '.',
+           'Email', 'LeaseAgreements', i.LeaseID
+    FROM inserted i
+    JOIN deleted d ON d.LeaseID = i.LeaseID
+    WHERE i.LeaseStatus IN ('Expired', 'Terminated')
+      AND d.LeaseStatus <> i.LeaseStatus;
+END;
+GO
+
+-- ------------------------------------------------------------
+-- B4. Maintenance request marked Completed -> auto-stamp
+--     CompletedDate and notify the requesting client.
+--     Direct trigger recursion is off by default in SQL Server,
+--     so the self-UPDATE below will not re-fire this trigger.
+-- ------------------------------------------------------------
+CREATE OR ALTER TRIGGER trg_MaintenanceRequests_AutoComplete
+ON dbo.MaintenanceRequests
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT UPDATE(Status)
+        RETURN;
+
+    UPDATE mr
+    SET mr.CompletedDate = GETDATE()
+    FROM dbo.MaintenanceRequests mr
+    JOIN inserted i ON i.RequestID = mr.RequestID
+    WHERE i.Status = 'Completed'
+      AND mr.CompletedDate IS NULL;
+
+    INSERT INTO dbo.Notifications (RecipientType, RecipientID, Subject, MessageBody, Channel, RelatedTable, RelatedRecordID)
+    SELECT 'Client', i.RequestedByClientID,
+           'Maintenance Request Completed',
+           'Your maintenance request (RequestID ' + CAST(i.RequestID AS NVARCHAR(20)) + ') has been completed.',
+           'Email', 'MaintenanceRequests', i.RequestID
+    FROM inserted i
+    JOIN deleted d ON d.RequestID = i.RequestID
+    WHERE i.Status = 'Completed'
+      AND d.Status <> 'Completed'
+      AND i.RequestedByClientID IS NOT NULL;
+END;
+GO
+
+
+PRINT 'All triggers (auditing + operational) created successfully.';
 GO

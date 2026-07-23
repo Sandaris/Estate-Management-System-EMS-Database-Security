@@ -1,16 +1,16 @@
--- ============================================================
--- MEMBER 1 (create_tables.sql)
--- Green Acres Realty Sdn Bhd
--- Estate Management System (EMS) - Full Database Schema
--- CT069-3-3 Database Security Assignment
--- =========================================================        
--- Covers:
---   * All original tables (Properties, Clients, Agents,
---     Transactions, MaintenanceRequests) - enhanced
---   * New tables: Departments, SystemUsers, UserLoginLog,
---     AuditLog, PropertyImages, LeaseAgreements,
---     CommissionPayments, MaintenanceStaff, Notifications
--- ============================================================
+/* ============================================================
+   MEMBER 1 - DATABASE SCHEMA (create_tables.sql)
+   Green Acres Realty Sdn Bhd - EMS Database Security
+   CT069-3-3 Database Security Assignment
+
+   Purpose:
+   Builds the full EMS database schema.
+     - All original tables (Properties, Clients, Agents,
+       Transactions, MaintenanceRequests) - enhanced
+     - New tables: Departments, SystemUsers, UserLoginLog,
+       AuditLog, PropertyImages, LeaseAgreements,
+       CommissionPayments, MaintenanceStaff, Notifications
+   ============================================================ */
 
 USE master;
 GO
@@ -26,9 +26,10 @@ GO
 USE GreenAcresEMS;
 GO
 
--- ============================================================
--- SECTION 1: CORE / ORIGINAL TABLES (Enhanced)
--- ============================================================
+/* ============================================================
+   SECTION 1: CORE / ORIGINAL TABLES (Enhanced)
+
+   ============================================================ */
 
 -- ------------------------------------------------------------
 -- 1. Properties
@@ -144,9 +145,10 @@ GO
 
 SELECT * FROM MaintenanceRequests
 
--- ============================================================
--- SECTION 2: NEW SUPPORTING TABLES
--- ============================================================
+/* ============================================================
+   SECTION 2: NEW SUPPORTING TABLES
+
+   ============================================================ */
 
 -- ------------------------------------------------------------
 -- 6. Departments
@@ -921,41 +923,41 @@ VALUES
 
 
 
--- ============================================================
---   MEMBER 2
---   access_control.sql (Roles, users, views, stored procedures)
---
---	 Green Acres Realty Sdn Bhd
---	 Estate Management System (EMS) - Full Database Schema
---   CT069-3-3 Database Security Assignment
---
---   Assigned Roles (Based on existing roles from SystemUsers table):
---   'DBA'				[role_DBA]
---   'PropMgmtDev'		[role_PropMgmtDev]
---   'ClientPortalDev'	[role_ClientPortalDev]
---   'Analyst'			[role_Analyst]
---   'ReadOnly'			[role_ReadOnly]
---   'Admin'			[role_Admin]
---
---   ============================================================
+/* ============================================================
+   MEMBER 2 - ACCESS CONTROL (access_control.sql)
+   Green Acres Realty Sdn Bhd - EMS Database Security
+   CT069-3-3 Database Security Assignment
+
+   Purpose:
+   Creates Roles, Users, Views and Stored Procedures to control
+   who can access what (based on the UserRole values already in
+   SystemUsers):
+     - 'DBA'              -> role_DBA
+     - 'PropMgmtDev'       -> role_PropMgmtDev
+     - 'ClientPortalDev'   -> role_ClientPortalDev
+     - 'Analyst'           -> role_Analyst
+     - 'ReadOnly'          -> role_ReadOnly
+     - 'Admin'             -> role_Admin
+   ============================================================ */
 
 USE GreenAcresEMS;
 GO
 
 
--- ============================================================
---   SECTION 1: Database Roles
---   ------------------------------------------------------------
---   One role per UserRole value from SystemUsers table.
---   Permissions are granted based on the role (PoLP - Principle of Least Privilege).
---
---   role_DBA			  : Database administrators (Full Control on Database)
---   role_Admin			  : System administrators with broad operational read/write (but not full Database control)
---   role_PropMgmtDev	  : Property & maintenance developers
---   role_ClientPortalDev : Client-facing portal developers
---   role_Analyst         : Analytics/reporting (Read-only aggregates)
---   role_ReadOnly        : General staff (Read via safe views only)
---   ============================================================ 
+/* ============================================================
+   SECTION 1: DATABASE ROLES
+
+   Purpose:
+   One role per UserRole value from SystemUsers table.
+   Permissions are granted based on the role (PoLP - Principle
+   of Least Privilege).
+     - role_DBA            : Database administrators (Full Control)
+     - role_Admin          : Broad operational read/write, no DB structural control
+     - role_PropMgmtDev    : Property & maintenance developers
+     - role_ClientPortalDev: Client-facing portal developers
+     - role_Analyst        : Analytics/reporting (read-only aggregates)
+     - role_ReadOnly       : General staff (read via safe views only)
+   ============================================================ */
 
 -- Remove members before dropping roles
 DECLARE @RoleName   NVARCHAR(128);
@@ -1008,9 +1010,12 @@ CREATE ROLE role_Analyst;
 CREATE ROLE role_ReadOnly;
 GO
 
--- ============================================================
---   SECTION 2: Logins And Database Users (Create two login acc per role)
---   ============================================================
+/* ============================================================
+   SECTION 2: LOGINS AND DATABASE USERS
+
+   Purpose:
+   Creates two sample login accounts per role.
+   ============================================================ */
 
 ----------------------------------------------------------------
 -- 2.1  DBA users  (Database Administration)
@@ -1153,18 +1158,21 @@ ALTER ROLE role_ReadOnly ADD MEMBER [nurul.huda];
 GO
 
 
--- ============================================================
---   SECTION 3: Permissions 
---   ------------------------------------------------------------
---     role_DBA           = Full control on the database (full access including UNMASK)
---     role_Admin         = Broad read/write on all operational tables (UNMASK granted to see real PII when needed & no DB structural control)
---     role_PropMgmtDev   = Property & maintenance domain only (Writes are funnelled through procedures)
---     role_ClientPortalDev = Client & transaction domain (Denied encrypted blob columns and financials)
---     role_Analyst       = SELECT on views only (NOT granted UNMASK)
---     role_ReadOnly      = SELECT on safe views only (no base table access at all)
+/* ============================================================
+   SECTION 3: PERMISSIONS
 
---	   UNMASK/ CONTROL will make sure DDM shows the real values (Information will be masked for non-UNMASK roles)
---   ============================================================ 
+   Purpose:
+   Grants each role only what it needs (PoLP):
+     - role_DBA            : Full control, including UNMASK
+     - role_Admin          : Broad read/write, UNMASK granted for PII
+     - role_PropMgmtDev    : Property & maintenance domain only, via procedures
+     - role_ClientPortalDev: Client & transaction domain, no financials/blobs
+     - role_Analyst        : SELECT on views only, no UNMASK
+     - role_ReadOnly       : SELECT on safe views only, no base tables
+
+   Note: UNMASK/CONTROL lets a role see real values; every other
+   role still sees masked data.
+   ============================================================ */
 
 ----------------------------------------------------------------
 -- 3.1  DBA: Full control (UNMASK + Alter any information)
@@ -1227,20 +1235,20 @@ GRANT SELECT ON dbo.Departments         TO role_Analyst;
 
 
 
--- ============================================================
---   SECTION 4: VIEWS
---   ------------------------------------------------------------
---   Give selective column and information viewing (So that base tables cannot be accessed directly.)
---
---   Views created:
---     1. vw_PropertyListing       - Public-safe property catalogue
---     2. vw_ClientDirectory       - Client list without PII blobs
---     3. vw_ActiveLeases          - Active lease summary
---     4. vw_AgentPerformance      - Per-agent transaction summary
---     5. vw_MonthlySalesSummary   - Monthly revenue roll-up
---     6. vw_MaintenanceOverview   - Maintenance workload overview
---     7. vw_CommissionSummary     - Commission roll-up
---   ============================================================
+/* ============================================================
+   SECTION 4: VIEWS
+
+   Purpose:
+   Gives selective column/row access so base tables never have
+   to be queried directly.
+     1. vw_PropertyListing     - Public-safe property catalogue
+     2. vw_ClientDirectory     - Client list without PII blobs
+     3. vw_ActiveLeases        - Active lease summary
+     4. vw_AgentPerformance    - Per-agent transaction summary
+     5. vw_MonthlySalesSummary - Monthly revenue roll-up
+     6. vw_MaintenanceOverview - Maintenance workload overview
+     7. vw_CommissionSummary   - Commission roll-up
+   ============================================================ */
 
 ----------------------------------------------------------------
 -- 4.1  Property listing (List of Properties with their information & status)
@@ -1432,31 +1440,30 @@ GRANT SELECT ON vw_ActiveLeases        TO role_ReadOnly;
 GRANT SELECT ON vw_MaintenanceOverview TO role_ReadOnly;
 GO
 
--- ============================================================
---   SECTION 5: STORED PROCEDURES
---   ------------------------------------------------------------
---     Client Management
---       1. usp_ManageClient         
---       2. usp_DeactivateClient
---       3. usp_ReactivateClient 
+/* ============================================================
+   SECTION 5: STORED PROCEDURES
 
---     Property Management
---       4. usp_ManageProperty       
---       5. usp_UpdatePropertyStatus 
-
---     Transaction / Operations
---       6. usp_RecordTransaction 
---       7. usp_UpdateTransactionStatus
---       8. usp_LogMaintenanceRequest 
---       9. usp_AssignMaintenanceStaff 
-
---     Reporting
---       10. usp_GetAgentTransactions
-
---     User Access Management (Extra)
---       11. usp_ProvisionUser 
---       12. usp_DeprovisionUser 
---   ============================================================
+   Purpose:
+   Controlled read/write entry points, so roles never need
+   direct table access to do their job.
+     Client Management
+       1. usp_ManageClient
+       2. usp_DeactivateClient
+       3. usp_ReactivateClient
+     Property Management
+       4. usp_ManageProperty
+       5. usp_UpdatePropertyStatus
+     Transaction / Operations
+       6. usp_RecordTransaction
+       7. usp_UpdateTransactionStatus
+       8. usp_LogMaintenanceRequest
+       9. usp_AssignMaintenanceStaff
+     Reporting
+       10. usp_GetAgentTransactions
+     User Access Management (Extra)
+       11. usp_ProvisionUser
+       12. usp_DeprovisionUser
+   ============================================================ */
 
 ----------------------------------------------------------------
 -- 5.1  usp_ManageClient (Adding a new client)
@@ -1841,9 +1848,10 @@ BEGIN
 END;
 GO
 
--- =============================
---   EXTRA FUNCTIONS/ STORED PROCEDURES
--- ===========================
+/* ============================================================
+   SECTION 5B: EXTRA STORED PROCEDURES - USER PROVISIONING
+
+   ============================================================ */
 
 ----------------------------------------------------------------
 -- 5.11: usp_ProvisionUser (User Provisioning - Add new user access) 
@@ -1991,9 +1999,13 @@ GO
 
 
 
--- ============================================================
---   SECTION 6: VERIFICATION (To test if everything is working accordingly)
---   ============================================================
+/* ============================================================
+   SECTION 6: VERIFICATION
+
+   Purpose:
+   Quick checks confirming roles, users, views and procedures
+   were all created successfully.
+   ============================================================ */
 
 -- Roles created
 SELECT name FROM sys.database_principals WHERE type = 'R' AND name LIKE 'role_%';
@@ -2014,14 +2026,15 @@ SELECT name FROM sys.procedures WHERE name LIKE 'usp_%';
 
 
 /* ============================================================
-   MEMBER 3
-   07_data_protection.sql
+   MEMBER 3 - DATA PROTECTION (07_data_protection.sql)
    Green Acres Realty Sdn Bhd - EMS Database Security
+   CT069-3-3 Database Security Assignment
 
+   Purpose:
    Focus Area:
-   1. Dynamic Data Masking
-   2. Column-Level Encryption
-   3. Hashing with Salting
+     1. Dynamic Data Masking
+     2. Column-Level Encryption
+     3. Hashing with Salting
 
    Scope:
    This script only modifies existing EMS data/table structures.
@@ -2746,12 +2759,194 @@ GO
 
 
 /* ============================================================
-   Member 4
-   Triggers
+   MEMBER 5 - BACKUP & RECOVERY (09_backup_recovery.sql)
    Green Acres Realty Sdn Bhd - EMS Database Security
    CT069-3-3 Database Security Assignment
 
-   Purpose    : Triggers - both AUDITING and OPERATIONAL.
+   Purpose:
+   Implements the Availability pillar of the CIA triad with a
+   complete backup and recovery strategy for GreenAcresEMS.
+
+   Strategy (3-tier):
+     1. FULL backup         - weekly baseline (entire DB)
+     2. DIFFERENTIAL backup - daily (changes since last FULL)
+     3. TRANSACTION LOG     - hourly (point-in-time recovery)
+
+   Note:
+   Adjust the disk path 'C:\EMS_Backups\' to a folder that the
+   SQL Server service account can write to. Create the folder
+   first (or use xp_create_subdir as shown below).
+   ============================================================ */
+
+USE master;
+GO
+
+/* ============================================================
+   SECTION 0: PREREQUISITES
+
+   Purpose:
+   Transaction-log backups require the FULL recovery model.
+   (In SIMPLE recovery model, BACKUP LOG is not allowed.)
+   ============================================================ */
+
+ALTER DATABASE GreenAcresEMS SET RECOVERY FULL;
+GO
+
+-- Create the backup directory on disk (requires xp_cmdshell OR
+-- do this manually in Windows Explorer). Optional helper:
+EXEC master.dbo.xp_create_subdir 'C:\EMS_Backups';
+GO
+
+
+/* ============================================================
+   SECTION 1: FULL DATABASE BACKUP (weekly baseline)
+
+   ============================================================ */
+
+BACKUP DATABASE GreenAcresEMS
+TO DISK = 'C:\EMS_Backups\GreenAcresEMS_FULL.bak'
+WITH
+    FORMAT,                         -- overwrite / create a fresh media set
+    INIT,                           -- overwrite existing backup sets
+    NAME = 'GreenAcresEMS-Full Database Backup',
+    DESCRIPTION = 'Weekly full baseline backup of the EMS database',
+    COMPRESSION,                    -- smaller backup file (Standard/Enterprise)
+    CHECKSUM,                       -- detect I/O corruption during backup
+    STATS = 10;                     -- progress reported every 10%
+GO
+
+
+/* ============================================================
+   SECTION 2: DIFFERENTIAL BACKUP (daily)
+
+   Purpose:
+   Captures only the data changed since the last FULL backup.
+   Faster and smaller than a full backup.
+   ============================================================ */
+
+BACKUP DATABASE GreenAcresEMS
+TO DISK = 'C:\EMS_Backups\GreenAcresEMS_DIFF.bak'
+WITH
+    DIFFERENTIAL,
+    INIT,
+    NAME = 'GreenAcresEMS-Differential Backup',
+    DESCRIPTION = 'Daily differential backup (changes since last full)',
+    COMPRESSION,
+    CHECKSUM,
+    STATS = 10;
+GO
+
+
+/* ============================================================
+   SECTION 3: TRANSACTION LOG BACKUP (hourly)
+
+   Purpose:
+   Enables point-in-time recovery and truncates the log to keep
+   it from growing indefinitely. Requires the FULL recovery model.
+   ============================================================ */
+
+BACKUP LOG GreenAcresEMS
+TO DISK = 'C:\EMS_Backups\GreenAcresEMS_LOG.trn'
+WITH
+    INIT,
+    NAME = 'GreenAcresEMS-Transaction Log Backup',
+    DESCRIPTION = 'Hourly transaction log backup for point-in-time recovery',
+    COMPRESSION,
+    CHECKSUM,
+    STATS = 10;
+GO
+
+
+/* ============================================================
+   SECTION 4: VERIFY THE BACKUPS
+
+   Purpose:
+   Confirms the backup set is complete and readable (does NOT
+   restore the database).
+   ============================================================ */
+
+RESTORE VERIFYONLY
+FROM DISK = 'C:\EMS_Backups\GreenAcresEMS_FULL.bak'
+WITH CHECKSUM;
+GO
+
+-- Inspect header / contents of a backup file:
+RESTORE HEADERONLY  FROM DISK = 'C:\EMS_Backups\GreenAcresEMS_FULL.bak';
+RESTORE FILELISTONLY FROM DISK = 'C:\EMS_Backups\GreenAcresEMS_FULL.bak';
+GO
+
+-- Review backup history from the system tables:
+SELECT
+    bs.database_name,
+    bs.backup_start_date,
+    bs.backup_finish_date,
+    CASE bs.type
+        WHEN 'D' THEN 'Full'
+        WHEN 'I' THEN 'Differential'
+        WHEN 'L' THEN 'Transaction Log'
+    END AS BackupType,
+    CAST(bs.backup_size / 1048576.0 AS DECIMAL(10,2)) AS BackupSize_MB,
+    bmf.physical_device_name
+FROM msdb.dbo.backupset bs
+JOIN msdb.dbo.backupmediafamily bmf
+     ON bs.media_set_id = bmf.media_set_id
+WHERE bs.database_name = 'GreenAcresEMS'
+ORDER BY bs.backup_start_date DESC;
+GO
+
+
+/* ============================================================
+   SECTION 5: RESTORE / DISASTER RECOVERY (documentation)
+
+   Purpose:
+   Full point-in-time recovery sequence. Run ONLY during a real
+   recovery drill - it overwrites the live database.
+
+   Restore order MUST be: FULL -> DIFFERENTIAL -> LOG(s).
+   Use NORECOVERY on every step except the last, then RECOVERY.
+   ============================================================ */
+
+/*
+USE master;
+GO
+
+-- Kick everyone else out so the DB can be restored:
+ALTER DATABASE GreenAcresEMS SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+GO
+
+-- 1) Restore the FULL backup (leave recovering for more backups)
+RESTORE DATABASE GreenAcresEMS
+FROM DISK = 'C:\EMS_Backups\GreenAcresEMS_FULL.bak'
+WITH NORECOVERY, REPLACE;
+GO
+
+-- 2) Restore the latest DIFFERENTIAL
+RESTORE DATABASE GreenAcresEMS
+FROM DISK = 'C:\EMS_Backups\GreenAcresEMS_DIFF.bak'
+WITH NORECOVERY;
+GO
+
+-- 3) Restore the transaction log up to a specific point in time
+RESTORE LOG GreenAcresEMS
+FROM DISK = 'C:\EMS_Backups\GreenAcresEMS_LOG.trn'
+WITH RECOVERY, STOPAT = '2026-07-22T14:30:00';
+GO
+
+ALTER DATABASE GreenAcresEMS SET MULTI_USER;
+GO
+*/
+
+PRINT 'Backup and recovery objects/steps set up successfully.';
+GO
+
+
+/* ============================================================
+   MEMBER 4 - TRIGGERS (08_triggers.sql)
+   Green Acres Realty Sdn Bhd - EMS Database Security
+   CT069-3-3 Database Security Assignment
+
+   Purpose:
+   Triggers - both AUDITING and OPERATIONAL.
 
    Scope:
    SECTION A - Auditing triggers

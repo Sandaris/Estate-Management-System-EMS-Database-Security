@@ -1678,11 +1678,20 @@ BEGIN
 
     DECLARE @sql NVARCHAR(MAX);
 
+    -- CREATE LOGIN's PASSWORD clause cannot be parameterized through
+    -- sp_executesql (SQL Server requires it as a literal in the command
+    -- text), so it is embedded directly below with its single quotes
+    -- doubled - the standard T-SQL escape - rather than left unescaped,
+    -- which is what would reopen the injection hole QUOTENAME closes for
+    -- @LoginName and @RoleName elsewhere in this procedure.
+    DECLARE @EscapedPassword NVARCHAR(258) = REPLACE(@Password, '''', '''''');
+
     BEGIN TRY
         -- Step 1: Create server-level login with password policy.
         SET @sql = N'CREATE LOGIN ' + QUOTENAME(@LoginName)
-                 + N' WITH PASSWORD = @pwd, CHECK_POLICY = ON, CHECK_EXPIRATION = ON;';
-        EXEC sys.sp_executesql @sql, N'@pwd NVARCHAR(128)', @pwd = @Password;
+                 + N' WITH PASSWORD = N''' + @EscapedPassword
+                 + N''', CHECK_POLICY = ON, CHECK_EXPIRATION = ON;';
+        EXEC sys.sp_executesql @sql;
         PRINT 'Step 1: Server login created for ' + @LoginName;
 
         -- Step 2: Create database user mapped to the login

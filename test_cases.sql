@@ -801,10 +801,41 @@ ORDER BY pr.name, SecurableName, dp.permission_name;
 GO
 
 
--- AUDIT EVIDENCE TESTS (TEST 1-12) Green Acres Realty Sdn Bhd - EMS Database
--- Security CT069-3-3 Database Security Assignment Purpose: Screenshot-friendly
--- test cases for Documentation Section 4. Run DDL.sql, then Sections 1-6 of
--- this file, before these tests.
+-- C21: usp_ProvisionUser handles a password containing a single quote
+-- Expected: 'PASS' - a legitimate password like O'Brien-style text must
+--           still work (CREATE LOGIN's PASSWORD clause cannot be
+--           parameterized through sp_executesql, so the procedure embeds it
+--           as a literal with quotes doubled) and must not let that quote
+--           break out of the string and inject extra SQL.
+DECLARE @ClientsBeforeC21 INT = (SELECT COUNT(*) FROM dbo.Clients);
+
+BEGIN TRY
+    EXEC dbo.usp_ProvisionUser
+        @LoginName = 'test.quotepw',
+        @Password  = 'O''Brien#Secure2026',
+        @RoleName  = 'role_ReadOnly';
+    IF SUSER_ID('test.quotepw') IS NOT NULL
+        PRINT 'PASS: login created with a quote in the password.';
+    ELSE
+        PRINT 'FAIL: login was not created.';
+END TRY
+BEGIN CATCH
+    PRINT 'FAIL: ' + ERROR_MESSAGE();
+END CATCH;
+
+IF (SELECT COUNT(*) FROM dbo.Clients) <> @ClientsBeforeC21
+    PRINT 'FAIL: dbo.Clients row count changed - the quote broke out of the string.';
+ELSE
+    PRINT 'PASS: dbo.Clients row count unchanged.';
+
+-- Clean up so repeated runs of this file do not pile up test logins.
+EXEC dbo.usp_DeprovisionUser @LoginName = 'test.quotepw';
+GO
+
+
+-- AUDIT EVIDENCE TESTS (TEST 1-12)
+-- Screenshot-friendly test cases for Documentation Section 4. Run
+-- Compiled_code.sql, then Sections 1-6 of this file, before these tests.
 
 USE GreenAcresEMS;
 GO

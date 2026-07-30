@@ -14,8 +14,8 @@ The original developer script (Appendix I of the brief) is five bare tables with
 
 | File | Lines | What it is |
 |---|---|---|
-| **`Compiled_code.sql`** | 4,175 | The whole build, in dependency order — 19 numbered parts, run top to bottom. |
-| **`test_cases.sql`** | 1,513 | The 77 test cases, run after the build. |
+| **`Compiled_code.sql`** | 4,184 | The whole build, in dependency order — 19 numbered parts, run top to bottom. |
+| **`test_cases.sql`** | 1,544 | The 77 test cases, run after the build. |
 | `DBS Assignment Question.pdf` | — | The assignment brief. |
 
 `Compiled_code.sql` builds the database in one forward pass, so nothing later in the file depends on something earlier being undone or redone: tables, then seed data (before any trigger exists, so the load fires nothing), then roles/users/permissions, then views and procedures, then the encrypted and hashed columns (encryption before masking, so it reads real values rather than the mask), then the audit objects and triggers, then backups last, once everything they'd capture already exists.
@@ -55,17 +55,17 @@ The brief lists twelve techniques. All twelve are implemented. Line numbers are 
 
 | # | Requirement | What was built | Line |
 |---|---|---|---|
-| 1 | View | 9 views — 7 business + 2 login-audit | 1114, 3148 |
-| 2 | Stored Procedure | 20 procedures | 1281, 2086, 2626 |
+| 1 | View | 9 views — 7 business + 2 login-audit | 1114, 3157 |
+| 2 | Stored Procedure | 20 procedures | 1281, 2095, 2635 |
 | 3 | Role | 6 roles | 898 |
 | 4 | User | 12 named logins + users + memberships | 908 |
-| 5 | Hash | SHA2_512 over a 32-byte `CRYPT_GEN_RANDOM` salt, per account | 1983 (columns), 2022 (load) |
-| 6 | Encryption | Master key → certificate → AES-256 symmetric key; 5 encrypted columns; controlled decryption procedures | 1839 (keys), 1909 (load), 2626 (decryption) |
-| 7 | Masking | 19 masked columns across 9 tables | 2271 |
-| 8 | Backups | Full, differential, log, copy-only + **certificate and master-key export** + restore rehearsal + point-in-time procedure | 3769 |
-| 9 | Server auditing | `GA_EMS_ServerAudit` + spec, 6 action groups | 3002 |
-| 10 | Database auditing | `GA_EMS_DatabaseAuditSpec`, 5 groups + 16 object-level actions | 3041 |
-| 11 | Trigger | 13 — 8 audit (3225), 4 operational (3647), 1 server `LOGON` (3092) | — |
+| 5 | Hash | SHA2_512 over a 32-byte `CRYPT_GEN_RANDOM` salt, per account | 1992 (columns), 2031 (load) |
+| 6 | Encryption | Master key → certificate → AES-256 symmetric key; 5 encrypted columns; controlled decryption procedures | 1848 (keys), 1918 (load), 2635 (decryption) |
+| 7 | Masking | 19 masked columns across 9 tables | 2280 |
+| 8 | Backups | Full, differential, log, copy-only + **certificate and master-key export** + restore rehearsal + point-in-time procedure | 3778 |
+| 9 | Server auditing | `GA_EMS_ServerAudit` + spec, 6 action groups | 3011 |
+| 10 | Database auditing | `GA_EMS_DatabaseAuditSpec`, 5 groups + 16 object-level actions | 3050 |
+| 11 | Trigger | 13 — 8 audit (3234), 4 operational (3656), 1 server `LOGON` (3101) | — |
 | 12 | New/edited tables | 5 originals extended + 9 new tables | 65 (structure), 303 (seed data) |
 
 Permissions are not a numbered requirement but carry a large share of Section 2's marks: line 1047 onwards for the database-, table-, view- and procedure-level `GRANT`/`DENY`.

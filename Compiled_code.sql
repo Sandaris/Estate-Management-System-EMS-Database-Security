@@ -3789,9 +3789,10 @@ GO
 -- overwrite an existing file (Msg 15240) - so without this, a stale file from
 -- a previous run both blocks this step and, if left in place unnoticed, would
 -- be the WRONG key material for the database rebuilt today.
-EXEC master.dbo.xp_delete_file 0, N'C:\EMS_Backups\Keys\', N'cer', GETDATE();
-EXEC master.dbo.xp_delete_file 0, N'C:\EMS_Backups\Keys\', N'pvk', GETDATE();
-EXEC master.dbo.xp_delete_file 0, N'C:\EMS_Backups\Keys\', N'key', GETDATE();
+DECLARE @KeyCleanupCutoff DATETIME = GETDATE();
+EXEC master.dbo.xp_delete_file 0, N'C:\EMS_Backups\Keys\', N'cer', @KeyCleanupCutoff;
+EXEC master.dbo.xp_delete_file 0, N'C:\EMS_Backups\Keys\', N'pvk', @KeyCleanupCutoff;
+EXEC master.dbo.xp_delete_file 0, N'C:\EMS_Backups\Keys\', N'key', @KeyCleanupCutoff;
 GO
 
 

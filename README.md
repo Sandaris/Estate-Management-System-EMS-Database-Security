@@ -14,7 +14,7 @@ The original developer script (Appendix I of the brief) is five bare tables with
 
 | File | Lines | What it is |
 |---|---|---|
-| **`Compiled_code.sql`** | 4,167 | The whole build, in dependency order — 19 numbered parts, run top to bottom. |
+| **`Compiled_code.sql`** | 4,168 | The whole build, in dependency order — 19 numbered parts, run top to bottom. |
 | **`test_cases.sql`** | 1,523 | The 77 test cases, run after the build. |
 | `DBS Assignment Question.pdf` | — | The assignment brief. |
 

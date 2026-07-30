@@ -3783,18 +3783,6 @@ GO
 EXEC master.dbo.xp_create_subdir 'C:\EMS_Backups\Keys';
 GO
 
--- Clear out key material left over from an earlier run. Every run generates a
--- fresh certificate and key pair, and unlike BACKUP DATABASE (which takes
--- INIT/FORMAT), BACKUP CERTIFICATE and BACKUP MASTER KEY simply refuse to
--- overwrite an existing file (Msg 15240) - so without this, a stale file from
--- a previous run both blocks this step and, if left in place unnoticed, would
--- be the WRONG key material for the database rebuilt today.
-DECLARE @KeyCleanupCutoff DATETIME = GETDATE();
-EXEC master.dbo.xp_delete_file 0, N'C:\EMS_Backups\Keys\', N'cer', @KeyCleanupCutoff;
-EXEC master.dbo.xp_delete_file 0, N'C:\EMS_Backups\Keys\', N'pvk', @KeyCleanupCutoff;
-EXEC master.dbo.xp_delete_file 0, N'C:\EMS_Backups\Keys\', N'key', @KeyCleanupCutoff;
-GO
-
 
 /* ========================================================================
    REQUIREMENT 8 (part 1): BACKING UP THE KEY MATERIAL
@@ -3803,19 +3791,30 @@ GO
    key and the database master key are exported too - and must be stored
    separately from the .bak files.
 
+   Each export is timestamped rather than overwriting a fixed filename.
+   GreenAcresEMS is dropped and rebuilt on every run, and CREATE CERTIFICATE /
+   CREATE MASTER KEY generate a fresh random key pair each time, so a fixed
+   name would either be refused outright (BACKUP CERTIFICATE and BACKUP
+   MASTER KEY have no INIT/FORMAT-style overwrite option, unlike BACKUP
+   DATABASE) or, if it could be forced, would silently discard the only key
+   material able to decrypt an earlier run's .bak. If more than one
+   GreenAcresEMS_FULL.bak exists, match its timestamp to the key files with
+   the same timestamp; day to day, the newest-timestamped files are the ones
+   that matter.
+
    RECOVERY ON A NEW INSTANCE - the order matters:
      RESTORE DATABASE GreenAcresEMS FROM DISK = '...FULL.bak' WITH ...;
      USE GreenAcresEMS;
      -- if the master key did not come across, restore it first:
-     RESTORE MASTER KEY FROM FILE = 'C:\EMS_Backups\Keys\EMS_MasterKey.key'
+     RESTORE MASTER KEY FROM FILE = 'C:\EMS_Backups\Keys\EMS_MasterKey_<timestamp>.key'
          DECRYPTION BY PASSWORD = '<the export password below>'
          ENCRYPTION BY PASSWORD = '<new DMK password>';
      OPEN MASTER KEY DECRYPTION BY PASSWORD = '<new DMK password>';
      -- then the certificate, if it is missing:
      CREATE CERTIFICATE EMS_DataProtectionCertificate
-         FROM FILE = 'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate.cer'
+         FROM FILE = 'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate_<timestamp>.cer'
          WITH PRIVATE KEY (
-             FILE = 'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate.pvk',
+             FILE = 'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate_<timestamp>.pvk',
              DECRYPTION BY PASSWORD = '<the export password below>');
    ======================================================================== */
 USE GreenAcresEMS;
@@ -3825,25 +3824,33 @@ GO
 OPEN MASTER KEY DECRYPTION BY PASSWORD = 'EMS_MasterKey_StrongPassword_2026!';
 GO
 
+-- Build this run's timestamped export filenames, then use them for both
+-- BACKUP statements below - the DECLAREs and their use must stay in the same
+-- batch, since local variables do not survive a GO.
+DECLARE @KeyStamp NVARCHAR(20)  = FORMAT(GETDATE(), 'yyyyMMdd_HHmmss');
+DECLARE @CerFile  NVARCHAR(300) = N'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate_' + @KeyStamp + N'.cer';
+DECLARE @PvkFile  NVARCHAR(300) = N'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate_' + @KeyStamp + N'.pvk';
+DECLARE @KeyFile  NVARCHAR(300) = N'C:\EMS_Backups\Keys\EMS_MasterKey_' + @KeyStamp + N'.key';
+
 -- 1 + 2. Export the certificate together with its private key.
 BACKUP CERTIFICATE EMS_DataProtectionCertificate
-    TO FILE = 'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate.cer'
+    TO FILE = @CerFile
     WITH PRIVATE KEY (
-        FILE = 'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate.pvk',
+        FILE = @PvkFile,
         ENCRYPTION BY PASSWORD = 'CertPrivateKey_Export_2026!'
     );
-GO
 
 -- 3. Export the Database Master Key itself.
 BACKUP MASTER KEY
-    TO FILE = 'C:\EMS_Backups\Keys\EMS_MasterKey.key'
+    TO FILE = @KeyFile
     ENCRYPTION BY PASSWORD = 'MasterKey_Export_2026!';
+
+PRINT 'Certificate, private key and database master key exported with timestamp ' + @KeyStamp + ' to C:\EMS_Backups\Keys.';
 GO
 
 CLOSE MASTER KEY;
 GO
 
-PRINT 'Certificate, private key and database master key exported to C:\EMS_Backups\Keys.';
 PRINT 'REMINDER: store these off-site and NOT in the same folder as the .bak files.';
 GO
 

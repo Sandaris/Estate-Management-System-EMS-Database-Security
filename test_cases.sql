@@ -1211,35 +1211,25 @@ GO
 
 
 -- D4: The KEY MATERIAL was backed up too
--- Expected: All three files exist (FileExists = 1).
-DECLARE @Info TABLE (
-    Label       NVARCHAR(60),
-    FilePath    NVARCHAR(300),
-    FileExists  INT,
-    IsDirectory INT,
-    ParentDirExists INT
-);
+-- Expected: at least one .cer, one .pvk and one .key file listed, most
+--           recent first. Filenames are timestamped (see Compiled_code.sql,
+--           REQUIREMENT 8 part 1) rather than fixed, because every run
+--           generates genuinely new key material - so this checks for a
+--           matching file by pattern rather than by one exact name.
+DECLARE @KeyFiles TABLE (FileName NVARCHAR(260), Depth INT, IsFile INT);
+INSERT INTO @KeyFiles (FileName, Depth, IsFile)
+EXEC master.dbo.xp_dirtree 'C:\EMS_Backups\Keys\', 1, 1;
 
-INSERT INTO @Info (FileExists, IsDirectory, ParentDirExists)
-EXEC master.dbo.xp_fileexist 'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate.cer';
-UPDATE @Info SET Label = 'Certificate (public .cer)',
-                 FilePath = 'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate.cer'
-WHERE Label IS NULL;
-
-INSERT INTO @Info (FileExists, IsDirectory, ParentDirExists)
-EXEC master.dbo.xp_fileexist 'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate.pvk';
-UPDATE @Info SET Label = 'Certificate private key (.pvk)',
-                 FilePath = 'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate.pvk'
-WHERE Label IS NULL;
-
-INSERT INTO @Info (FileExists, IsDirectory, ParentDirExists)
-EXEC master.dbo.xp_fileexist 'C:\EMS_Backups\Keys\EMS_MasterKey.key';
-UPDATE @Info SET Label = 'Database Master Key (.key)',
-                 FilePath = 'C:\EMS_Backups\Keys\EMS_MasterKey.key'
-WHERE Label IS NULL;
-
-SELECT Label AS KeyMaterial, FilePath, FileExists
-FROM @Info;
+SELECT
+    CASE
+        WHEN FileName LIKE '%.cer' THEN 'Certificate (public .cer)'
+        WHEN FileName LIKE '%.pvk' THEN 'Certificate private key (.pvk)'
+        WHEN FileName LIKE '%.key' THEN 'Database Master Key (.key)'
+    END AS KeyMaterial,
+    FileName
+FROM @KeyFiles
+WHERE FileName LIKE '%.cer' OR FileName LIKE '%.pvk' OR FileName LIKE '%.key'
+ORDER BY KeyMaterial, FileName DESC;
 GO
 
 

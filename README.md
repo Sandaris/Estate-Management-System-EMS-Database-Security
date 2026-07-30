@@ -14,8 +14,8 @@ The original developer script (Appendix I of the brief) is five bare tables with
 
 | File | Lines | What it is |
 |---|---|---|
-| **`Compiled_code.sql`** | 4,168 | The whole build, in dependency order — 19 numbered parts, run top to bottom. |
-| **`test_cases.sql`** | 1,523 | The 77 test cases, run after the build. |
+| **`Compiled_code.sql`** | 4,175 | The whole build, in dependency order — 19 numbered parts, run top to bottom. |
+| **`test_cases.sql`** | 1,513 | The 77 test cases, run after the build. |
 | `DBS Assignment Question.pdf` | — | The assignment brief. |
 
 `Compiled_code.sql` builds the database in one forward pass, so nothing later in the file depends on something earlier being undone or redone: tables, then seed data (before any trigger exists, so the load fires nothing), then roles/users/permissions, then views and procedures, then the encrypted and hashed columns (encryption before masking, so it reads real values rather than the mask), then the audit objects and triggers, then backups last, once everything they'd capture already exists.

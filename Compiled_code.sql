@@ -3,6 +3,27 @@
 USE master;
 GO
 
+-- Remove the logon trigger from any previous run FIRST.
+-- It reads GreenAcresEMS.dbo.SystemUsers, so leaving it in place while the
+-- database is being dropped and rebuilt is asking for confusing errors.
+-- (Its own TRY/CATCH means it could never actually block a login, but a
+-- clean build should not depend on that safety net.)
+IF EXISTS (SELECT 1 FROM sys.server_triggers WHERE name = 'trg_ServerLogon_AuditLogin')
+BEGIN
+    DROP TRIGGER trg_ServerLogon_AuditLogin ON ALL SERVER;
+    PRINT 'Removed logon trigger from previous run.';
+END;
+GO
+
+-- Kick any leftover sessions off the database, otherwise DROP DATABASE fails
+-- with "database is currently in use" when someone still has a query window
+-- open against GreenAcresEMS.
+IF EXISTS (SELECT name FROM sys.databases WHERE name = 'GreenAcresEMS')
+BEGIN
+    ALTER DATABASE GreenAcresEMS SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+END;
+GO
+
 -- Drop and recreate the database for a clean setup
 IF EXISTS (SELECT name FROM sys.databases WHERE name = 'GreenAcresEMS')
     DROP DATABASE GreenAcresEMS;
@@ -37,10 +58,9 @@ CREATE TABLE Properties (
     Status          NVARCHAR(50)    NOT NULL        DEFAULT 'Available'
         CONSTRAINT CK_Properties_Status CHECK (Status IN ('Available','Sold','Rented','Under Maintenance','Reserved')),
     IsActive        BIT             NOT NULL        DEFAULT 1,  -- soft-delete flag
-    CreatedDate     DATETIME        NOT NULL        DEFAULT GETDATE(),
+    CreatedDate     DATETIME        NOT NULL        DEFAULT GETDATE()
 );
 GO
-SELECT * FROM Properties
 
 --    Enhanced: added NRIC (for encryption later), ClientType,
 --    IsActive. Sensitive PII columns flagged in comments.
@@ -54,10 +74,9 @@ CREATE TABLE Clients (
     ClientType      NVARCHAR(50)    NOT NULL        DEFAULT 'Individual'
         CONSTRAINT CK_Clients_Type CHECK (ClientType IN ('Individual','Corporate')),
     IsActive        BIT             NOT NULL        DEFAULT 1,
-    RegisteredDate  DATETIME        NOT NULL        DEFAULT GETDATE(),
+    RegisteredDate  DATETIME        NOT NULL        DEFAULT GETDATE()
 );
 GO
-SELECT * FROM Clients
 --    Enhanced: added DepartmentID (FK), LicenseNumber,
 --    IsActive. CommissionRate is sensitive financial data.
 CREATE TABLE Agents (
@@ -69,10 +88,9 @@ CREATE TABLE Agents (
     CommissionRate  DECIMAL(5,2)    NOT NULL        DEFAULT 2.50, -- [SENSITIVE]
         CONSTRAINT CK_Agents_CommRate CHECK (CommissionRate BETWEEN 0 AND 100),
     IsActive        BIT             NOT NULL        DEFAULT 1,
-    JoinedDate      DATETIME        NOT NULL        DEFAULT GETDATE(),
+    JoinedDate      DATETIME        NOT NULL        DEFAULT GETDATE()
 );
 GO
-SELECT * FROM Agents
 --    Enhanced: added RentEndDate, PaymentStatus,
 --    PaymentMethod for lease/sale lifecycle tracking.
 CREATE TABLE Transactions (
@@ -95,7 +113,6 @@ CREATE TABLE Transactions (
 );
 GO
 
-SELECT * FROM Transactions
 --    Enhanced: added AssignedStaffID, Priority, CompletedDate,
 --    EstimatedCost, ActualCost for full work-order tracking.
 CREATE TABLE MaintenanceRequests (
@@ -116,7 +133,6 @@ CREATE TABLE MaintenanceRequests (
 );
 GO
 
-SELECT * FROM MaintenanceRequests
 
 
 --    Represents the IT and business departments formed during
@@ -130,7 +146,6 @@ CREATE TABLE Departments (
 );
 GO
 
-SELECT * FROM Departments
 
 --    Internal IT/staff users who access the EMS database
 --    (developers, DBAs, analysts). NOT end-user clients.
@@ -143,17 +158,21 @@ CREATE TABLE SystemUsers (
     FullName        NVARCHAR(100)   NOT NULL,
     LoginName       NVARCHAR(100)   NOT NULL        UNIQUE, -- matches SQL Server login
     Email           NVARCHAR(100)   NOT NULL,               -- [SENSITIVE - will be masked]
-    PasswordHash    VARBINARY(64)   NULL,                   -- [SENSITIVE - SHA-256 hash]
-    PasswordSalt    NVARCHAR(50)    NULL,                   -- salt for hashing
+    -- LEGACY, INHERITED FROM THE ORIGINAL DEVELOPERS. These two columns are
+    -- created and populated only so the migration can be shown end to end;
+    -- the hashing section later replaces them with PasswordHashSecure /
+    -- PasswordSaltSecure (SHA2_512 over a 32-byte random salt) and then
+    -- DROPS them. They must not appear in the final data dictionary.
+    PasswordHash    VARBINARY(64)   NULL,                   -- [DEPRECATED - weak SHA2_256]
+    PasswordSalt    NVARCHAR(50)    NULL,                   -- [DEPRECATED - salt in plain text]
     UserRole        NVARCHAR(50)    NOT NULL
         CONSTRAINT CK_SysUser_Role CHECK (UserRole IN (
             'DBA','PropMgmtDev','ClientPortalDev','Analyst','ReadOnly','Admin'
         )),
     IsActive        BIT             NOT NULL        DEFAULT 1,
-    CreatedDate     DATETIME        NOT NULL        DEFAULT GETDATE(),
+    CreatedDate     DATETIME        NOT NULL        DEFAULT GETDATE()
 );
 GO
-SELECT * FROM SystemUsers
 
 --    Tracks every login attempt (success + failure) against
 --    the EMS. Supports both server-level and DB-level audit.
@@ -172,7 +191,6 @@ CREATE TABLE UserLoginLog (
 );
 GO
 
-SELECT * FROM UserLoginLog
 
 --    Central audit trail for all DML events (INSERT, UPDATE,
 --    DELETE) across sensitive tables. Populated by triggers
@@ -182,7 +200,7 @@ CREATE TABLE AuditLog (
     EventTime       DATETIME        NOT NULL        DEFAULT GETDATE(),
     TableName       NVARCHAR(128)   NOT NULL,
     OperationType   NVARCHAR(10)    NOT NULL
-        CONSTRAINT CK_Audit_Op CHECK (OperationType IN ('INSERT','UPDATE','DELETE')),
+        CONSTRAINT CK_Audit_Op CHECK (OperationType IN ('INSERT','UPDATE','DELETE','SELECT')),
     RecordID        NVARCHAR(50)    NOT NULL,       -- PK value of affected row (stored as string)
     ChangedBy       NVARCHAR(100)   NOT NULL        DEFAULT SYSTEM_USER,
     OldValues       NVARCHAR(MAX)   NULL,           -- JSON snapshot of old row
@@ -192,7 +210,6 @@ CREATE TABLE AuditLog (
 );
 GO
 
-SELECT * FROM AuditLog
 
 -- 10. LeaseAgreements
 --     Formalises rental agreements between clients and
@@ -220,7 +237,6 @@ CREATE TABLE LeaseAgreements (
 );
 GO
 
-SELECT * FROM LeaseAgreements
 
 -- 11. CommissionPayments
 --     Tracks commission earned and paid to agents per
@@ -241,7 +257,6 @@ CREATE TABLE CommissionPayments (
 );
 GO
 
-SELECT * FROM CommissionPayments
 
 -- 12. MaintenanceStaff
 --     Tracks in-house or contracted maintenance workers.
@@ -257,7 +272,6 @@ CREATE TABLE MaintenanceStaff (
 );
 GO
 
-SELECT * FROM MaintenanceStaff
 
 -- Add FK back to MaintenanceRequests for assigned staff
 ALTER TABLE MaintenanceRequests
@@ -286,7 +300,6 @@ CREATE TABLE Notifications (
 );
 GO
 
-SELECT * FROM Notifications
 
 -- INSERTING VALUES
 -- residential, commercial, industrial and land properties.
@@ -845,46 +858,59 @@ GO
 
 
 
--- Remove members before dropping roles
-DECLARE @RoleName   NVARCHAR(128);
-DECLARE @MemberName NVARCHAR(128);
-DECLARE @sql        NVARCHAR(500);
+-- ------------------------------------------------------------------------
+-- Clean-up before creating principals
+--
+-- Database-scoped principals (roles + users) do NOT need to be dropped
+-- here: the DROP DATABASE / CREATE DATABASE at the very top of this script
+-- already destroyed every role and user that lived inside GreenAcresEMS.
+--
+-- Server-scoped LOGINS survive DROP DATABASE, so re-running this script on
+-- the same instance leaves the 12 EMS logins behind as orphans. We drop
+-- them here so the script is fully repeatable. Each DROP is wrapped in
+-- TRY/CATCH because a login cannot be dropped while it still owns objects
+-- or has an open session - in that case we report it and carry on instead
+-- of aborting the whole build.
+-- ------------------------------------------------------------------------
+DECLARE @EmsLogins TABLE (LoginName SYSNAME);
 
--- Remove members one at a time until none remain
-WHILE EXISTS (
-    SELECT 1
-    FROM sys.database_role_members rm
-    JOIN sys.database_principals r ON r.principal_id = rm.role_principal_id
-    WHERE r.name IN (
-        'role_Admin', 'role_DBA', 'role_PropMgmtDev',
-        'role_ClientPortalDev', 'role_Analyst', 'role_ReadOnly'
-    )
-)
+INSERT INTO @EmsLogins (LoginName)
+VALUES ('arun.kumar'), ('linda.tan'), ('farid.rahman'), ('melissa.wong'),
+       ('kelvin.ong'), ('aminah.salleh'), ('vijay.menon'), ('sofia.aziz'),
+       ('hakim.zulkifli'), ('rachel.lee'), ('jason.lim'), ('nurul.huda');
+
+DECLARE @LoginName SYSNAME;
+DECLARE @sql       NVARCHAR(500);
+
+DECLARE login_cursor CURSOR LOCAL FAST_FORWARD FOR
+    SELECT LoginName FROM @EmsLogins;
+
+OPEN login_cursor;
+FETCH NEXT FROM login_cursor INTO @LoginName;
+
+WHILE @@FETCH_STATUS = 0
 BEGIN
-    SELECT TOP 1
-        @RoleName   = r.name,
-        @MemberName = m.name
-    FROM sys.database_role_members rm
-    JOIN sys.database_principals r ON r.principal_id = rm.role_principal_id
-    JOIN sys.database_principals m ON m.principal_id = rm.member_principal_id
-    WHERE r.name IN (
-        'role_Admin', 'role_DBA', 'role_PropMgmtDev',
-        'role_ClientPortalDev', 'role_Analyst', 'role_ReadOnly'
-    );
+    IF SUSER_ID(@LoginName) IS NOT NULL
+    BEGIN
+        BEGIN TRY
+            -- QUOTENAME protects the identifier even though these names are
+            -- hard-coded here (defence in depth / consistent style).
+            SET @sql = N'DROP LOGIN ' + QUOTENAME(@LoginName) + N';';
+            EXEC sys.sp_executesql @sql;
+            PRINT 'Dropped orphaned login: ' + @LoginName;
+        END TRY
+        BEGIN CATCH
+            PRINT 'Could not drop login ' + @LoginName + ' -> ' + ERROR_MESSAGE();
+        END CATCH;
+    END;
 
-    SET @sql = 'ALTER ROLE [' + @RoleName + '] DROP MEMBER [' + @MemberName + ']';
-    EXEC(@sql);
+    FETCH NEXT FROM login_cursor INTO @LoginName;
 END;
 
--- All roles are now empty so safe to drop
-IF DATABASE_PRINCIPAL_ID('role_Admin')           IS NOT NULL DROP ROLE role_Admin;
-IF DATABASE_PRINCIPAL_ID('role_DBA')             IS NOT NULL DROP ROLE role_DBA;
-IF DATABASE_PRINCIPAL_ID('role_PropMgmtDev')     IS NOT NULL DROP ROLE role_PropMgmtDev;
-IF DATABASE_PRINCIPAL_ID('role_ClientPortalDev') IS NOT NULL DROP ROLE role_ClientPortalDev;
-IF DATABASE_PRINCIPAL_ID('role_Analyst')         IS NOT NULL DROP ROLE role_Analyst;
-IF DATABASE_PRINCIPAL_ID('role_ReadOnly')        IS NOT NULL DROP ROLE role_ReadOnly;
+CLOSE login_cursor;
+DEALLOCATE login_cursor;
 
-PRINT 'All roles removed successfully.';
+PRINT 'Login clean-up finished. Ready to create roles and users.';
 GO
 
 -- Create the 6 necessary roles
@@ -901,13 +927,26 @@ CREATE ROLE role_ReadOnly;
 GO
 
 
-IF SUSER_ID('arun.kumar') IS NULL
-    
 /* ========================================================================
    REQUIREMENT 4: USER (AND PERMISSIONS)
+
+   Every IT staff member gets their OWN login with a UNIQUE password, so
+   that the audit trail (ORIGINAL_LOGIN()) can attribute every change to a
+   single named person. Shared accounts would destroy accountability.
+
+   CHECK_POLICY     = ON -> Windows complexity rules are enforced.
+   CHECK_EXPIRATION = ON -> the login is subject to the password-age policy.
+
+   NOTE FOR MARKING: the passwords below are written in clear text only
+   because this is a build script that has to be handed in and re-run by
+   the lecturer. In production these would be supplied at run time from a
+   secrets vault (or the logins would be Windows/Entra ID authenticated),
+   never committed to a script file.
    ======================================================================== */
-CREATE LOGIN [arun.kumar] WITH PASSWORD = 'Dba@Strong#2026',
-        CHECK_POLICY = ON;
+IF SUSER_ID('arun.kumar') IS NULL
+    CREATE LOGIN [arun.kumar] WITH PASSWORD = 'Dba#Arun!7fK2026',
+        CHECK_POLICY = ON,       -- enforce Windows password complexity
+        CHECK_EXPIRATION = ON;   -- subject the login to the password-age policy
 GO
 IF USER_ID('arun.kumar') IS NULL
     CREATE USER [arun.kumar] FOR LOGIN [arun.kumar];
@@ -916,8 +955,9 @@ ALTER ROLE role_DBA ADD MEMBER [arun.kumar];
 GO
 
 IF SUSER_ID('linda.tan') IS NULL
-    CREATE LOGIN [linda.tan] WITH PASSWORD = 'Dba@Strong#2026',
-        CHECK_POLICY = ON;
+    CREATE LOGIN [linda.tan] WITH PASSWORD = 'Dba#Linda!3qM2026',
+        CHECK_POLICY = ON,       -- enforce Windows password complexity
+        CHECK_EXPIRATION = ON;   -- subject the login to the password-age policy
 GO
 IF USER_ID('linda.tan') IS NULL
     CREATE USER [linda.tan] FOR LOGIN [linda.tan];
@@ -926,8 +966,9 @@ ALTER ROLE role_DBA ADD MEMBER [linda.tan];
 GO
 
 IF SUSER_ID('farid.rahman') IS NULL
-    CREATE LOGIN [farid.rahman] WITH PASSWORD = 'Admin@Strong#2026',
-        CHECK_POLICY = ON;
+    CREATE LOGIN [farid.rahman] WITH PASSWORD = 'Adm#Farid!8xR2026',
+        CHECK_POLICY = ON,       -- enforce Windows password complexity
+        CHECK_EXPIRATION = ON;   -- subject the login to the password-age policy
 GO
 IF USER_ID('farid.rahman') IS NULL
     CREATE USER [farid.rahman] FOR LOGIN [farid.rahman];
@@ -936,8 +977,9 @@ ALTER ROLE role_Admin ADD MEMBER [farid.rahman];
 GO
 
 IF SUSER_ID('melissa.wong') IS NULL
-    CREATE LOGIN [melissa.wong] WITH PASSWORD = 'Admin@Strong#2026',
-        CHECK_POLICY = ON;
+    CREATE LOGIN [melissa.wong] WITH PASSWORD = 'Adm#Melissa!5tW2026',
+        CHECK_POLICY = ON,       -- enforce Windows password complexity
+        CHECK_EXPIRATION = ON;   -- subject the login to the password-age policy
 GO
 IF USER_ID('melissa.wong') IS NULL
     CREATE USER [melissa.wong] FOR LOGIN [melissa.wong];
@@ -947,8 +989,9 @@ GO
 
 
 IF SUSER_ID('kelvin.ong') IS NULL
-    CREATE LOGIN [kelvin.ong] WITH PASSWORD = 'Prop@Strong#2026',
-        CHECK_POLICY = ON;
+    CREATE LOGIN [kelvin.ong] WITH PASSWORD = 'Prp#Kelvin!9bL2026',
+        CHECK_POLICY = ON,       -- enforce Windows password complexity
+        CHECK_EXPIRATION = ON;   -- subject the login to the password-age policy
 GO
 IF USER_ID('kelvin.ong') IS NULL
     CREATE USER [kelvin.ong] FOR LOGIN [kelvin.ong];
@@ -957,8 +1000,9 @@ ALTER ROLE role_PropMgmtDev ADD MEMBER [kelvin.ong];
 GO
 
 IF SUSER_ID('aminah.salleh') IS NULL
-    CREATE LOGIN [aminah.salleh] WITH PASSWORD = 'Prop@Strong#2026',
-        CHECK_POLICY = ON;
+    CREATE LOGIN [aminah.salleh] WITH PASSWORD = 'Prp#Aminah!4nS2026',
+        CHECK_POLICY = ON,       -- enforce Windows password complexity
+        CHECK_EXPIRATION = ON;   -- subject the login to the password-age policy
 GO
 IF USER_ID('aminah.salleh') IS NULL
     CREATE USER [aminah.salleh] FOR LOGIN [aminah.salleh];
@@ -967,8 +1011,9 @@ ALTER ROLE role_PropMgmtDev ADD MEMBER [aminah.salleh];
 GO
 
 IF SUSER_ID('vijay.menon') IS NULL
-    CREATE LOGIN [vijay.menon] WITH PASSWORD = 'Portal@Strong#2026',
-        CHECK_POLICY = ON;
+    CREATE LOGIN [vijay.menon] WITH PASSWORD = 'Ptl#Vijay!6vD2026',
+        CHECK_POLICY = ON,       -- enforce Windows password complexity
+        CHECK_EXPIRATION = ON;   -- subject the login to the password-age policy
 GO
 IF USER_ID('vijay.menon') IS NULL
     CREATE USER [vijay.menon] FOR LOGIN [vijay.menon];
@@ -977,8 +1022,9 @@ ALTER ROLE role_ClientPortalDev ADD MEMBER [vijay.menon];
 GO
 
 IF SUSER_ID('sofia.aziz') IS NULL
-    CREATE LOGIN [sofia.aziz] WITH PASSWORD = 'Portal@Strong#2026',
-        CHECK_POLICY = ON;
+    CREATE LOGIN [sofia.aziz] WITH PASSWORD = 'Ptl#Sofia!2zG2026',
+        CHECK_POLICY = ON,       -- enforce Windows password complexity
+        CHECK_EXPIRATION = ON;   -- subject the login to the password-age policy
 GO
 IF USER_ID('sofia.aziz') IS NULL
     CREATE USER [sofia.aziz] FOR LOGIN [sofia.aziz];
@@ -987,8 +1033,9 @@ ALTER ROLE role_ClientPortalDev ADD MEMBER [sofia.aziz];
 GO
 
 IF SUSER_ID('hakim.zulkifli') IS NULL
-    CREATE LOGIN [hakim.zulkifli] WITH PASSWORD = 'Analyst@Strong#2026',
-        CHECK_POLICY = ON;
+    CREATE LOGIN [hakim.zulkifli] WITH PASSWORD = 'Anl#Hakim!7hJ2026',
+        CHECK_POLICY = ON,       -- enforce Windows password complexity
+        CHECK_EXPIRATION = ON;   -- subject the login to the password-age policy
 GO
 IF USER_ID('hakim.zulkifli') IS NULL
     CREATE USER [hakim.zulkifli] FOR LOGIN [hakim.zulkifli];
@@ -997,8 +1044,9 @@ ALTER ROLE role_Analyst ADD MEMBER [hakim.zulkifli];
 GO
 
 IF SUSER_ID('rachel.lee') IS NULL
-    CREATE LOGIN [rachel.lee] WITH PASSWORD = 'Analyst@Strong#2026',
-        CHECK_POLICY = ON;
+    CREATE LOGIN [rachel.lee] WITH PASSWORD = 'Anl#Rachel!1cP2026',
+        CHECK_POLICY = ON,       -- enforce Windows password complexity
+        CHECK_EXPIRATION = ON;   -- subject the login to the password-age policy
 GO
 IF USER_ID('rachel.lee') IS NULL
     CREATE USER [rachel.lee] FOR LOGIN [rachel.lee];
@@ -1007,8 +1055,9 @@ ALTER ROLE role_Analyst ADD MEMBER [rachel.lee];
 GO
 
 IF SUSER_ID('jason.lim') IS NULL
-    CREATE LOGIN [jason.lim] WITH PASSWORD = 'Read@Strong#2026',
-        CHECK_POLICY = ON;
+    CREATE LOGIN [jason.lim] WITH PASSWORD = 'Ro#Jason!5yT2026',
+        CHECK_POLICY = ON,       -- enforce Windows password complexity
+        CHECK_EXPIRATION = ON;   -- subject the login to the password-age policy
 GO
 IF USER_ID('jason.lim') IS NULL
     CREATE USER [jason.lim] FOR LOGIN [jason.lim];
@@ -1017,8 +1066,9 @@ ALTER ROLE role_ReadOnly ADD MEMBER [jason.lim];
 GO
 
 IF SUSER_ID('nurul.huda') IS NULL
-    CREATE LOGIN [nurul.huda] WITH PASSWORD = 'Read@Strong#2026',
-        CHECK_POLICY = ON;
+    CREATE LOGIN [nurul.huda] WITH PASSWORD = 'Ro#Nurul!8kQ2026',
+        CHECK_POLICY = ON,       -- enforce Windows password complexity
+        CHECK_EXPIRATION = ON;   -- subject the login to the password-age policy
 GO
 IF USER_ID('nurul.huda') IS NULL
     CREATE USER [nurul.huda] FOR LOGIN [nurul.huda];
@@ -1029,6 +1079,34 @@ GO
 
 
 GRANT CONTROL ON DATABASE::GreenAcresEMS TO role_DBA;
+GO
+
+-- ------------------------------------------------------------------------
+-- Server-level permission for the DBA logins.
+--
+-- CONTROL ON DATABASE (above) covers everything INSIDE GreenAcresEMS, but
+-- creating or dropping a LOGIN is a server-level action. Without this the
+-- DBAs would get "permission denied" the moment they ran usp_ProvisionUser,
+-- which is exactly the job we built that procedure for.
+--
+-- ALTER ANY LOGIN is granted instead of adding them to the securityadmin
+-- fixed server role, because securityadmin can also GRANT server-level
+-- permissions to itself and is effectively a path to sysadmin.
+-- ------------------------------------------------------------------------
+USE master;
+GO
+
+GRANT ALTER ANY LOGIN TO [arun.kumar];
+GRANT ALTER ANY LOGIN TO [linda.tan];
+GO
+
+-- VIEW ANY DEFINITION lets the DBAs inspect object definitions across the
+-- instance when troubleshooting, without any data access.
+GRANT VIEW ANY DEFINITION TO [arun.kumar];
+GRANT VIEW ANY DEFINITION TO [linda.tan];
+GO
+
+USE GreenAcresEMS;
 GO
 
 --      (They need to resolve client queries)
@@ -1064,15 +1142,15 @@ GRANT SELECT                  ON dbo.Properties         TO role_ClientPortalDev;
 GRANT SELECT, INSERT, UPDATE ON dbo.Transactions        TO role_ClientPortalDev;
 GRANT SELECT, INSERT, UPDATE ON dbo.LeaseAgreements     TO role_ClientPortalDev;
 GRANT SELECT                  ON dbo.Agents             TO role_ClientPortalDev;
+GO
 
+--      Read-only across the reporting domain
 GRANT SELECT ON dbo.Properties          TO role_Analyst;
 GRANT SELECT ON dbo.Transactions        TO role_Analyst;
 GRANT SELECT ON dbo.MaintenanceRequests TO role_Analyst;
 GRANT SELECT ON dbo.Agents              TO role_Analyst;
 GRANT SELECT ON dbo.Departments         TO role_Analyst;
-
-
-
+GO
 
 
 /* ========================================================================
@@ -1096,7 +1174,6 @@ AS
     WHERE IsActive = 1;
 GO
 
-SELECT * FROM vw_PropertyListing;
 
 CREATE OR ALTER VIEW vw_ClientDirectory
 AS
@@ -1112,7 +1189,6 @@ AS
     FROM dbo.Clients;
 GO
 
-SELECT * FROM vw_ClientDirectory;
 
 CREATE OR ALTER VIEW vw_ActiveLeases
 AS
@@ -1131,7 +1207,6 @@ AS
     WHERE l.LeaseStatus = 'Active';
 GO
 
-SELECT * FROM vw_ActiveLeases;
 
 CREATE OR ALTER VIEW vw_AgentPerformance
 AS
@@ -1149,7 +1224,6 @@ AS
     GROUP BY a.AgentID, a.FullName, a.LicenseNumber;
 GO
 
-SELECT * FROM vw_AgentPerformance;
 
 CREATE OR ALTER VIEW vw_MonthlySalesSummary
 AS
@@ -1167,7 +1241,6 @@ AS
         t.TransactionType;
 GO
 
-SELECT * FROM vw_MonthlySalesSummary;
 
 CREATE OR ALTER VIEW vw_MaintenanceOverview
 AS
@@ -1185,7 +1258,6 @@ AS
     LEFT  JOIN dbo.MaintenanceStaff s ON s.StaffID    = m.AssignedStaffID;
 GO
 
-SELECT * FROM vw_MaintenanceOverview;
 
 CREATE OR ALTER VIEW vw_CommissionSummary
 AS
@@ -1202,7 +1274,6 @@ AS
     INNER JOIN dbo.Transactions t ON t.TransactionID = cp.TransactionID;
 GO
 
-SELECT * FROM vw_CommissionSummary;
 
 --   4.8  View-Level Permission Grants
 --   Read-only and Analyst roles get SELECT on views only. (role_ReadOnly gets data without any base-table permission.)
@@ -1598,6 +1669,27 @@ GO
 
 
 
+-- ------------------------------------------------------------------------
+-- usp_ProvisionUser
+--
+-- Single, auditable entry point for onboarding a new IT staff member:
+-- creates the login, the database user and the role membership in one step.
+--
+-- SECURITY NOTES
+--   1. CREATE LOGIN / CREATE USER / ALTER ROLE cannot be parameterised, so
+--      dynamic SQL is unavoidable here. Every identifier is therefore
+--      wrapped in QUOTENAME() and @LoginName is validated against a strict
+--      whitelist first, which closes the SQL-injection hole that plain
+--      string concatenation would leave open.
+--   2. The password IS passed as a real parameter to sp_executesql, so it
+--      never becomes part of the executable SQL text and cannot break out
+--      of its quotes.
+--   3. Dynamic SQL breaks ownership chaining, so the CALLER (not the
+--      procedure owner) needs the underlying permissions. The caller must
+--      hold server-level ALTER ANY LOGIN plus ALTER ANY USER in this
+--      database. That is why EXECUTE is granted to role_DBA only, and why
+--      the two DBA logins are granted ALTER ANY LOGIN further down.
+-- ------------------------------------------------------------------------
 CREATE OR ALTER PROCEDURE dbo.usp_ProvisionUser
     @LoginName NVARCHAR(100),
     @Password  NVARCHAR(128),
@@ -1605,7 +1697,18 @@ CREATE OR ALTER PROCEDURE dbo.usp_ProvisionUser
 AS
 BEGIN
     SET NOCOUNT ON;
- 
+
+    -- Make sure no empty information is given (checked FIRST, because
+    -- "NULL NOT IN (...)" evaluates to UNKNOWN and would fall through the
+    -- role check below without ever raising an error).
+    IF @LoginName IS NULL OR LTRIM(RTRIM(@LoginName)) = ''
+       OR @Password IS NULL OR @Password = ''
+       OR @RoleName IS NULL OR LTRIM(RTRIM(@RoleName)) = ''
+    BEGIN
+        RAISERROR('LoginName, Password and RoleName are needed and cannot be empty.', 16, 1);
+        RETURN;
+    END;
+
     -- Match role name against the 6 defined roles
     IF @RoleName NOT IN (
         'role_Admin', 'role_DBA', 'role_PropMgmtDev',
@@ -1616,81 +1719,141 @@ BEGIN
         RETURN;
     END;
 
-	-- Make sure no empty information is given
-	IF @LoginName IS NULL OR @Password IS NULL OR @RoleName IS NULL
-        BEGIN
-            RAISERROR('LoginName, Password and RoleName are needed and cannot be empty.', 16, 1);
-            RETURN;
-        END;
- 
+    -- Whitelist the login name: letters, digits, dot, underscore and hyphen
+    -- only. This rejects brackets, quotes, semicolons and comment markers,
+    -- so an injected payload such as  x];DROP TABLE dbo.Clients--
+    -- can never reach the dynamic SQL below.
+    IF @LoginName LIKE '%[^a-zA-Z0-9._-]%'
+    BEGIN
+        RAISERROR('LoginName may only contain letters, digits, dot, underscore or hyphen.', 16, 1);
+        RETURN;
+    END;
+
+    IF LEN(@Password) < 12
+    BEGIN
+        RAISERROR('Password must be at least 12 characters long.', 16, 1);
+        RETURN;
+    END;
+
     -- Check if login already exist
     IF SUSER_ID(@LoginName) IS NOT NULL
     BEGIN
         RAISERROR('Login already exists.', 16, 1);
         RETURN;
     END;
- 
-    -- Step 1: Create server-level login with password policy
-    EXEC('CREATE LOGIN [' + @LoginName + '] WITH PASSWORD = N''' + @Password + ''', CHECK_POLICY = ON;');
-    PRINT 'Step 1: Server login created for ' + @LoginName;
- 
-    -- Step 2: Create database user mapped to the login
-    EXEC('CREATE USER [' + @LoginName + '] FOR LOGIN [' + @LoginName + '];');
-    PRINT 'Step 2: Database user created.';
- 
-    -- Step 3: Assign user to the specified role
-    EXEC('ALTER ROLE [' + @RoleName + '] ADD MEMBER [' + @LoginName + '];');
-    PRINT 'Step 3: ' + @LoginName + ' assigned to ' + @RoleName;
- 
-    PRINT @LoginName + ' added successfully.';
+
+    DECLARE @sql NVARCHAR(MAX);
+
+    BEGIN TRY
+        -- Step 1: Create server-level login with password policy.
+        --         @Password travels as a bound parameter, not as text.
+        SET @sql = N'CREATE LOGIN ' + QUOTENAME(@LoginName)
+                 + N' WITH PASSWORD = @pwd, CHECK_POLICY = ON, CHECK_EXPIRATION = ON;';
+        EXEC sys.sp_executesql @sql, N'@pwd NVARCHAR(128)', @pwd = @Password;
+        PRINT 'Step 1: Server login created for ' + @LoginName;
+
+        -- Step 2: Create database user mapped to the login
+        SET @sql = N'CREATE USER ' + QUOTENAME(@LoginName)
+                 + N' FOR LOGIN ' + QUOTENAME(@LoginName) + N';';
+        EXEC sys.sp_executesql @sql;
+        PRINT 'Step 2: Database user created.';
+
+        -- Step 3: Assign user to the specified role
+        SET @sql = N'ALTER ROLE ' + QUOTENAME(@RoleName)
+                 + N' ADD MEMBER ' + QUOTENAME(@LoginName) + N';';
+        EXEC sys.sp_executesql @sql;
+        PRINT 'Step 3: ' + @LoginName + ' assigned to ' + @RoleName;
+
+        PRINT @LoginName + ' added successfully.';
+    END TRY
+    BEGIN CATCH
+        -- Surface the real reason (usually "permission denied" when the
+        -- caller is not a sysadmin / has no ALTER ANY LOGIN).
+        DECLARE @msg NVARCHAR(2048) = N'usp_ProvisionUser failed: ' + ERROR_MESSAGE();
+        RAISERROR(@msg, 16, 1);
+    END CATCH;
 END;
 GO
 
 
+-- ------------------------------------------------------------------------
+-- usp_DeprovisionUser
+--
+-- Offboarding counterpart to usp_ProvisionUser: strips role membership,
+-- drops the database user, then drops the server login - in that order,
+-- because SQL Server refuses to drop a login that still has a mapped user.
+-- Same QUOTENAME hardening and same caller-permission requirement as above.
+-- ------------------------------------------------------------------------
 CREATE OR ALTER PROCEDURE dbo.usp_DeprovisionUser
     @LoginName NVARCHAR(100)
 AS
 BEGIN
     SET NOCOUNT ON;
- 
+
+    IF @LoginName IS NULL OR LTRIM(RTRIM(@LoginName)) = ''
+    BEGIN
+        RAISERROR('LoginName is required.', 16, 1);
+        RETURN;
+    END;
+
+    -- Same whitelist as usp_ProvisionUser - never build dynamic SQL from an
+    -- unvalidated identifier.
+    IF @LoginName LIKE '%[^a-zA-Z0-9._-]%'
+    BEGIN
+        RAISERROR('LoginName may only contain letters, digits, dot, underscore or hyphen.', 16, 1);
+        RETURN;
+    END;
+
     -- Check if login actually exists
     IF SUSER_ID(@LoginName) IS NULL
     BEGIN
         RAISERROR('Login not found. No action taken.', 16, 1);
         RETURN;
     END;
- 
-    DECLARE @RoleName NVARCHAR(128);
- 
-    -- Step 1: Remove user from every role they exist in
-    WHILE EXISTS (
-        SELECT 1 FROM sys.database_role_members rm
-        JOIN sys.database_principals r ON r.principal_id = rm.role_principal_id
-        JOIN sys.database_principals m ON m.principal_id = rm.member_principal_id
-        WHERE m.name = @LoginName
-    )
-    BEGIN
-        SELECT TOP 1 @RoleName = r.name
-        FROM sys.database_role_members rm
-        JOIN sys.database_principals r ON r.principal_id = rm.role_principal_id
-        JOIN sys.database_principals m ON m.principal_id = rm.member_principal_id
-        WHERE m.name = @LoginName;
- 
 
-        EXEC('ALTER ROLE [' + @RoleName + '] DROP MEMBER [' + @LoginName + '];');
-    END;
-    PRINT 'Step 1: ' + @LoginName + ' removed from all roles.';
- 
-    -- Step 2: Drop the database-level user
-    IF USER_ID(@LoginName) IS NOT NULL
-        EXEC('DROP USER [' + @LoginName + '];');
-    PRINT 'Step 2: Database user dropped.';
- 
-    -- Step 3: Drop the server-level login
-    EXEC('DROP LOGIN [' + @LoginName + '];');
-    PRINT 'Step 3: Server login dropped.';
- 
-    PRINT @LoginName + ' fully removed.';
+    DECLARE @RoleName NVARCHAR(128);
+    DECLARE @sql      NVARCHAR(MAX);
+
+    BEGIN TRY
+        -- Step 1: Remove user from every role they exist in
+        WHILE EXISTS (
+            SELECT 1 FROM sys.database_role_members rm
+            JOIN sys.database_principals r ON r.principal_id = rm.role_principal_id
+            JOIN sys.database_principals m ON m.principal_id = rm.member_principal_id
+            WHERE m.name = @LoginName
+        )
+        BEGIN
+            SELECT TOP 1 @RoleName = r.name
+            FROM sys.database_role_members rm
+            JOIN sys.database_principals r ON r.principal_id = rm.role_principal_id
+            JOIN sys.database_principals m ON m.principal_id = rm.member_principal_id
+            WHERE m.name = @LoginName;
+
+            SET @sql = N'ALTER ROLE ' + QUOTENAME(@RoleName)
+                     + N' DROP MEMBER ' + QUOTENAME(@LoginName) + N';';
+            EXEC sys.sp_executesql @sql;
+        END;
+        PRINT 'Step 1: ' + @LoginName + ' removed from all roles.';
+
+        -- Step 2: Drop the database-level user
+        IF USER_ID(@LoginName) IS NOT NULL
+        BEGIN
+            SET @sql = N'DROP USER ' + QUOTENAME(@LoginName) + N';';
+            EXEC sys.sp_executesql @sql;
+        END;
+        PRINT 'Step 2: Database user dropped.';
+
+        -- Step 3: Drop the server-level login
+        SET @sql = N'DROP LOGIN ' + QUOTENAME(@LoginName) + N';';
+        EXEC sys.sp_executesql @sql;
+        PRINT 'Step 3: Server login dropped.';
+
+        PRINT @LoginName + ' fully removed.';
+    END TRY
+    BEGIN CATCH
+        DECLARE @msg NVARCHAR(2048) = N'usp_DeprovisionUser failed: ' + ERROR_MESSAGE();
+        RAISERROR(@msg, 16, 1);
+    END CATCH;
 END;
 GO
 
@@ -1708,8 +1871,12 @@ GRANT EXECUTE ON dbo.usp_UpdateTransactionStatus TO role_Admin;
 GRANT EXECUTE ON dbo.usp_LogMaintenanceRequest  TO role_Admin;
 GRANT EXECUTE ON dbo.usp_AssignMaintenanceStaff TO role_Admin;
 GRANT EXECUTE ON dbo.usp_GetAgentTransactions   TO role_Admin;
-GRANT EXECUTE ON dbo.usp_ProvisionUser			TO role_Admin;
-GRANT EXECUTE ON dbo.usp_DeprovisionUser		TO role_Admin;
+-- User provisioning is a DBA duty, not a business-admin duty, so EXECUTE on
+-- the two provisioning procedures goes to role_DBA only. (Creating a login
+-- is a server-level act; letting a business Admin do it would let them mint
+-- accounts in any role, including role_DBA, and quietly escalate privilege.)
+GRANT EXECUTE ON dbo.usp_ProvisionUser			TO role_DBA;
+GRANT EXECUTE ON dbo.usp_DeprovisionUser		TO role_DBA;
 GO
 
 -- PropMgmtDev: Property & Maintenance procedures only
@@ -2068,11 +2235,73 @@ IF NOT EXISTS (
 )
 BEGIN
     ALTER TABLE dbo.MaintenanceStaff
-    ALTER COLUMN ContactNumber 
+    ALTER COLUMN ContactNumber
 /* ========================================================================
    REQUIREMENT 7: MASKING
    ======================================================================== */
 ADD MASKED WITH (FUNCTION = 'partial(3, "XXXXXXX", 2)');
+END;
+GO
+
+
+
+/* ========================================================================
+   REQUIREMENT 7 (continued): MASKING - KNOWN LIMIT + ANALYST EXCEPTION
+
+   IMPORTANT LIMITATION, stated deliberately for the report:
+   Dynamic Data Masking is a PRESENTATION control, not a security boundary.
+   It masks the *column* in the output, but it does NOT mask the result of
+   an expression computed over that column. A user with no UNMASK permission
+   can therefore still recover real values, for example:
+
+       SELECT SUM(Amount) FROM dbo.Transactions;      -- returns REAL total
+       SELECT COUNT(*) FROM dbo.Clients WHERE Email = 'known@x.com';
+
+   Our own reporting views vw_MonthlySalesSummary and vw_AgentPerformance
+   aggregate Transactions.Amount, so the totals they return are real figures
+   even for roles that see Amount masked when they read the base table.
+
+   We handle this in two ways rather than pretending it does not happen:
+     1. DDM is layered BEHIND permissions (roles only reach the tables and
+        views their job needs) and behind auditing (SELECT on the sensitive
+        tables is captured by the Database Audit Specification). DDM is the
+        last layer, never the only one.
+     2. role_Analyst legitimately needs true financial figures - that is the
+        analytics department's entire job - so instead of leaving them with
+        an accidental bypass we grant them EXPLICIT, COLUMN-LEVEL UNMASK on
+        just the financial columns, and leave every PII column masked.
+        The permission is now intentional, documented and auditable.
+
+   Column-level UNMASK (GRANT UNMASK ON OBJECT::t(c)) requires SQL Server
+   2022 (major version 16) or Azure SQL. On SQL Server 2019 the only option
+   is database-wide UNMASK, which would also expose PII - so on 2019 we
+   deliberately grant nothing and accept the aggregate limitation instead.
+   ======================================================================== */
+-- The GRANT statements are issued through sp_executesql on purpose. Written
+-- inline, the column-level UNMASK syntax would have to be PARSED by every
+-- version of SQL Server that runs this script - and a SQL Server 2019 parser
+-- would reject the whole batch before the version check below ever executed.
+-- Dynamic SQL defers parsing until we already know the version is 2022+.
+IF CAST(SERVERPROPERTY('ProductMajorVersion') AS INT) >= 16
+BEGIN
+    PRINT 'SQL Server 2022+ detected: applying column-level UNMASK for role_Analyst.';
+
+    -- Financial columns the analytics team reports on:
+    EXEC sys.sp_executesql N'GRANT UNMASK ON dbo.Transactions(Amount)                TO role_Analyst;';
+    EXEC sys.sp_executesql N'GRANT UNMASK ON dbo.Properties(Price)                   TO role_Analyst;';
+    EXEC sys.sp_executesql N'GRANT UNMASK ON dbo.CommissionPayments(CommissionAmount) TO role_Analyst;';
+    EXEC sys.sp_executesql N'GRANT UNMASK ON dbo.CommissionPayments(CommissionRate)   TO role_Analyst;';
+    EXEC sys.sp_executesql N'GRANT UNMASK ON dbo.LeaseAgreements(MonthlyRent)         TO role_Analyst;';
+
+    -- NOTE what is deliberately NOT granted: Clients.NRIC, Clients.Email,
+    -- Clients.ContactNumber, Clients.Address, Agents.ContactNumber,
+    -- Agents.Email, SystemUsers.Email, MaintenanceStaff.ContactNumber.
+    -- Analysts get numbers, never identities.
+END
+ELSE
+BEGIN
+    PRINT 'SQL Server 2019 or older detected: column-level UNMASK is not available.';
+    PRINT 'role_Analyst keeps masked columns; the aggregate limitation above is accepted and documented.';
 END;
 GO
 
@@ -2147,6 +2376,17 @@ GO
 
 
 
+-- ------------------------------------------------------------------------
+-- Populate the ciphertext columns from the existing plain values.
+--
+-- IMPORTANT ORDERING NOTE: this runs AFTER Dynamic Data Masking has been
+-- applied to the same table. That is safe only because this script is
+-- executed by a sysadmin / the database owner, who is implicitly exempt
+-- from masking. If a user WITHOUT the UNMASK permission ran this block,
+-- EncryptByKey would faithfully encrypt the MASKED strings ("XXXXXX1234")
+-- and the real data would be lost. Anyone re-running this must therefore
+-- connect as sysadmin, db_owner, or a login holding UNMASK.
+-- ------------------------------------------------------------------------
 OPEN SYMMETRIC KEY EMS_ClientDataSymmetricKey
 DECRYPTION BY CERTIFICATE EMS_DataProtectionCertificate;
 GO
@@ -2245,6 +2485,11 @@ GO
 
 
 
+-- Every account is seeded with the SAME temporary password and is expected
+-- to change it at first login (see PasswordMustChange below). A shared
+-- onboarding secret that must be replaced immediately is standard practice;
+-- what would NOT be acceptable is leaving it in place, which is why the
+-- verification procedure refuses to complete a login until it is changed.
 UPDATE dbo.SystemUsers
 SET
     PasswordHashSecure = HASHBYTES(
@@ -2254,6 +2499,50 @@ SET
     PasswordHashAlgorithm = 'SHA2_512',
     PasswordLastUpdated = GETDATE()
 WHERE PasswordHashSecure IS NULL;
+GO
+
+-- Forced-reset flag: 1 = still on the onboarding password.
+IF COL_LENGTH('dbo.SystemUsers', 'PasswordMustChange') IS NULL
+BEGIN
+    ALTER TABLE dbo.SystemUsers
+    ADD PasswordMustChange BIT NOT NULL CONSTRAINT DF_SysUser_MustChange DEFAULT 1;
+END;
+GO
+
+
+/* ------------------------------------------------------------------------
+   REMOVING THE OLD, WEAKER CREDENTIAL STORE
+
+   The original developers stored credentials in two columns:
+       PasswordHash VARBINARY(64) -- HASHBYTES('SHA2_256', password + salt)
+       PasswordSalt NVARCHAR(50)  -- the salt, in PLAIN TEXT
+
+   Both are now superseded by PasswordHashSecure / PasswordSaltSecure, and
+   leaving them in place would be a real weakness, not just clutter:
+
+     * the salt sat next to the hash in a readable NVARCHAR column, so
+       anyone with SELECT on SystemUsers had everything needed to run an
+       offline dictionary attack;
+     * SHA2_256 over a short salt is far cheaper to brute-force than the
+       SHA2_512 over a 32-byte CRYPT_GEN_RANDOM salt we use now;
+     * two credential stores for one account means an attacker simply
+       attacks the weaker one.
+
+   So we drop them. The DEFAULT constraint has to go first, and the columns
+   are dropped only after the secure hashes above have been generated.
+   ------------------------------------------------------------------------ */
+IF COL_LENGTH('dbo.SystemUsers', 'PasswordHash') IS NOT NULL
+BEGIN
+    ALTER TABLE dbo.SystemUsers DROP COLUMN PasswordHash;
+    PRINT 'Dropped legacy column SystemUsers.PasswordHash (SHA2_256).';
+END;
+GO
+
+IF COL_LENGTH('dbo.SystemUsers', 'PasswordSalt') IS NOT NULL
+BEGIN
+    ALTER TABLE dbo.SystemUsers DROP COLUMN PasswordSalt;
+    PRINT 'Dropped legacy column SystemUsers.PasswordSalt (plain-text salt).';
+END;
 GO
 
 
@@ -2291,13 +2580,30 @@ BEGIN
         PasswordSaltSecure = @NewSalt,
         PasswordHashSecure = @NewHash,
         PasswordHashAlgorithm = 'SHA2_512',
-        PasswordLastUpdated = GETDATE()
+        PasswordLastUpdated = GETDATE(),
+        PasswordMustChange = 0      -- the onboarding password is now replaced
     WHERE LoginName = @LoginName;
+
+    PRINT 'Password updated for ' + @LoginName + '.';
 END;
 GO
 
 
 
+-- ------------------------------------------------------------------------
+-- usp_VerifySystemUserPassword
+--
+-- Verifies an application-level login by re-hashing the supplied password
+-- with the stored per-user salt and comparing the digests. The stored hash
+-- is never reversed and the plain password is never written anywhere.
+--
+-- Every attempt - successful OR failed - is now recorded in
+-- dbo.UserLoginLog, which is what turns that table into real audit
+-- evidence instead of an empty schema object. Failed SERVER logins (wrong
+-- SQL Server password at connect time) are captured separately by the
+-- FAILED_LOGIN_GROUP action in the Server Audit Specification; this
+-- procedure covers logins performed by the EMS application itself.
+-- ------------------------------------------------------------------------
 CREATE OR ALTER PROCEDURE dbo.usp_VerifySystemUserPassword
     @LoginName NVARCHAR(100),
     @PlainPassword NVARCHAR(200)
@@ -2305,19 +2611,30 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @StoredSalt VARBINARY(32);
-    DECLARE @StoredHash VARBINARY(64);
-    DECLARE @InputHash VARBINARY(64);
+    DECLARE @StoredSalt   VARBINARY(32);
+    DECLARE @StoredHash   VARBINARY(64);
+    DECLARE @InputHash    VARBINARY(64);
+    DECLARE @SystemUserID INT;
 
     SELECT
-        @StoredSalt = PasswordSaltSecure,
-        @StoredHash = PasswordHashSecure
+        @SystemUserID = SystemUserID,
+        @StoredSalt   = PasswordSaltSecure,
+        @StoredHash   = PasswordHashSecure
     FROM dbo.SystemUsers
     WHERE LoginName = @LoginName
       AND IsActive = 1;
 
     IF @StoredSalt IS NULL OR @StoredHash IS NULL
     BEGIN
+        -- Unknown or deactivated account. We log the attempt but return the
+        -- same generic message as a wrong password, so an attacker cannot
+        -- use the error text to enumerate valid user names.
+        INSERT INTO dbo.UserLoginLog
+            (SystemUserID, LoginName, IsSuccessful, HostName, FailureReason)
+        VALUES
+            (@SystemUserID, @LoginName, 0, HOST_NAME(),
+             'Unknown or inactive account');
+
         SELECT
             'Invalid Login' AS LoginStatus,
             @LoginName AS LoginName;
@@ -2331,8 +2648,34 @@ BEGIN
 
     IF @InputHash = @StoredHash
     BEGIN
+        INSERT INTO dbo.UserLoginLog
+            (SystemUserID, LoginName, IsSuccessful, HostName, FailureReason)
+        VALUES
+            (@SystemUserID, @LoginName, 1, HOST_NAME(), NULL);
+
+        DECLARE @LogID INT = SCOPE_IDENTITY();
+
+        -- Correct password, but still the shared onboarding secret: the
+        -- credential is valid yet must not be usable for real work until
+        -- the account owner replaces it.
+        IF EXISTS (SELECT 1 FROM dbo.SystemUsers
+                   WHERE LoginName = @LoginName AND PasswordMustChange = 1)
+        BEGIN
+            SELECT
+                'Password Change Required' AS LoginStatus,
+                @LogID                     AS LogID,
+                SystemUserID,
+                FullName,
+                LoginName,
+                UserRole
+            FROM dbo.SystemUsers
+            WHERE LoginName = @LoginName;
+            RETURN;
+        END;
+
         SELECT
             'Login Successful' AS LoginStatus,
+            @LogID             AS LogID,   -- pass to usp_RecordLogout later
             SystemUserID,
             FullName,
             LoginName,
@@ -2342,12 +2685,312 @@ BEGIN
     END
     ELSE
     BEGIN
+        INSERT INTO dbo.UserLoginLog
+            (SystemUserID, LoginName, IsSuccessful, HostName, FailureReason)
+        VALUES
+            (@SystemUserID, @LoginName, 0, HOST_NAME(), 'Incorrect password');
+
         SELECT
             'Invalid Login' AS LoginStatus,
             @LoginName AS LoginName;
     END;
 END;
 GO
+
+
+
+-- ------------------------------------------------------------------------
+-- usp_RecordLogout
+--
+-- Closes off a session row in UserLoginLog so the audit trail shows how
+-- long each account was connected, not just when it arrived.
+-- ------------------------------------------------------------------------
+CREATE OR ALTER PROCEDURE dbo.usp_RecordLogout
+    @LogID INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE dbo.UserLoginLog
+    SET LogoutTime = GETDATE()
+    WHERE LogID = @LogID
+      AND LogoutTime IS NULL;
+
+    IF @@ROWCOUNT = 0
+        PRINT 'No open session found for that LogID (already closed or invalid).';
+    ELSE
+        PRINT 'Logout recorded.';
+END;
+GO
+
+
+
+-- ------------------------------------------------------------------------
+-- usp_ReportSuspiciousLogins
+--
+-- Detection query for the DBA: any account with 3 or more failed attempts
+-- inside a rolling window is reported as a possible brute-force attempt.
+-- ------------------------------------------------------------------------
+CREATE OR ALTER PROCEDURE dbo.usp_ReportSuspiciousLogins
+    @WindowMinutes  INT = 60,
+    @FailThreshold  INT = 3
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        LoginName,
+        COUNT(*)        AS FailedAttempts,
+        MIN(LoginTime)  AS FirstAttempt,
+        MAX(LoginTime)  AS LastAttempt,
+        MAX(HostName)   AS LastHostName
+    FROM dbo.UserLoginLog
+    WHERE IsSuccessful = 0
+      AND LoginTime >= DATEADD(MINUTE, -@WindowMinutes, GETDATE())
+    GROUP BY LoginName
+    HAVING COUNT(*) >= @FailThreshold
+    ORDER BY FailedAttempts DESC;
+END;
+GO
+
+
+
+/* ========================================================================
+   REQUIREMENT 6 (continued): CONTROLLED DECRYPTION PATH
+
+   Encrypting the data is only half the job - the business still has to be
+   able to READ it. Without the objects below, nothing except the database
+   owner could ever decrypt these columns, which would break Availability
+   (the "A" in CIA) for the sake of Confidentiality.
+
+   Design decision: the procedures are declared WITH EXECUTE AS OWNER.
+   That means the *procedure* opens the symmetric key using the certificate,
+   so we never have to hand CONTROL of the certificate to the calling role.
+   A caller who is granted EXECUTE can read the decrypted values through
+   this one narrow, auditable door and cannot use the key for anything else.
+
+   The audit triggers use ORIGINAL_LOGIN() rather than SYSTEM_USER, so
+   EXECUTE AS OWNER does NOT hide who the real caller was.
+   ======================================================================== */
+
+-- ------------------------------------------------------------------------
+-- usp_GetClientSensitiveData
+--
+-- Returns decrypted client PII for ONE client at a time. Deliberately not
+-- a view and deliberately not bulk: a caller must name the ClientID they
+-- have a business reason to look at, and every call is captured by the
+-- Database Audit Specification on dbo.Clients.
+-- ------------------------------------------------------------------------
+CREATE OR ALTER PROCEDURE dbo.usp_GetClientSensitiveData
+    @ClientID INT,
+    @Reason   NVARCHAR(200) = NULL   -- purpose-of-access, written to AuditLog
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @ClientID IS NULL
+    BEGIN
+        RAISERROR('ClientID is required.', 16, 1);
+        RETURN;
+    END;
+
+    IF NOT EXISTS (SELECT 1 FROM dbo.Clients WHERE ClientID = @ClientID)
+    BEGIN
+        RAISERROR('Client ID not found.', 16, 1);
+        RETURN;
+    END;
+
+    -- Record WHO asked for decrypted PII and WHY, before handing it over.
+    -- ORIGINAL_LOGIN() survives EXECUTE AS OWNER, so this names the human.
+    INSERT INTO dbo.AuditLog
+        (TableName, OperationType, RecordID, ChangedBy,
+         NewValues, ApplicationName, HostName)
+    VALUES
+        ('Clients', 'SELECT', CONVERT(NVARCHAR(50), @ClientID), ORIGINAL_LOGIN(),
+         (SELECT 'DECRYPT_READ'                AS Action,
+                 ISNULL(@Reason, 'not stated') AS Reason
+          FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+         APP_NAME(), HOST_NAME());
+
+    OPEN SYMMETRIC KEY EMS_ClientDataSymmetricKey
+        DECRYPTION BY CERTIFICATE EMS_DataProtectionCertificate;
+
+    SELECT
+        c.ClientID,
+        c.FullName,
+        CONVERT(NVARCHAR(20),  DecryptByKey(c.NRIC_Encrypted))          AS NRIC,
+        CONVERT(NVARCHAR(20),  DecryptByKey(c.ContactNumber_Encrypted)) AS ContactNumber,
+        CONVERT(NVARCHAR(100), DecryptByKey(c.Email_Encrypted))         AS Email,
+        CONVERT(NVARCHAR(255), DecryptByKey(c.Address_Encrypted))       AS Address,
+        c.ClientType,
+        c.IsActive
+    FROM dbo.Clients AS c
+    WHERE c.ClientID = @ClientID;
+
+    CLOSE SYMMETRIC KEY EMS_ClientDataSymmetricKey;
+END;
+GO
+
+
+
+-- ------------------------------------------------------------------------
+-- usp_GetLeaseDocumentPath
+--
+-- Same pattern for the encrypted lease-document location.
+-- ------------------------------------------------------------------------
+CREATE OR ALTER PROCEDURE dbo.usp_GetLeaseDocumentPath
+    @LeaseID INT
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM dbo.LeaseAgreements WHERE LeaseID = @LeaseID)
+    BEGIN
+        RAISERROR('Lease ID not found.', 16, 1);
+        RETURN;
+    END;
+
+    OPEN SYMMETRIC KEY EMS_ClientDataSymmetricKey
+        DECRYPTION BY CERTIFICATE EMS_DataProtectionCertificate;
+
+    SELECT
+        l.LeaseID,
+        l.ClientID,
+        l.PropertyID,
+        CONVERT(NVARCHAR(500), DecryptByKey(l.AgreementDocPath_Encrypted))
+            AS AgreementDocPath,
+        l.LeaseStatus
+    FROM dbo.LeaseAgreements AS l
+    WHERE l.LeaseID = @LeaseID;
+
+    CLOSE SYMMETRIC KEY EMS_ClientDataSymmetricKey;
+END;
+GO
+
+
+
+-- ------------------------------------------------------------------------
+-- usp_EncryptClientPII
+--
+-- Re-encrypts the sensitive columns for a client after an INSERT/UPDATE.
+-- Without this, any row created through usp_ManageClient after the initial
+-- build would have plain values but EMPTY ciphertext columns, and the
+-- encryption would silently stop covering new data.
+-- ------------------------------------------------------------------------
+CREATE OR ALTER PROCEDURE dbo.usp_EncryptClientPII
+    @ClientID INT = NULL       -- NULL = refresh every row that needs it
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    OPEN SYMMETRIC KEY EMS_ClientDataSymmetricKey
+        DECRYPTION BY CERTIFICATE EMS_DataProtectionCertificate;
+
+    UPDATE dbo.Clients
+    SET
+        NRIC_Encrypted = EncryptByKey(
+            Key_GUID('EMS_ClientDataSymmetricKey'), CONVERT(VARBINARY(MAX), NRIC)),
+        ContactNumber_Encrypted = EncryptByKey(
+            Key_GUID('EMS_ClientDataSymmetricKey'), CONVERT(VARBINARY(MAX), ContactNumber)),
+        Email_Encrypted = EncryptByKey(
+            Key_GUID('EMS_ClientDataSymmetricKey'), CONVERT(VARBINARY(MAX), Email)),
+        Address_Encrypted = EncryptByKey(
+            Key_GUID('EMS_ClientDataSymmetricKey'), CONVERT(VARBINARY(MAX), Address))
+    WHERE (@ClientID IS NULL OR ClientID = @ClientID)
+      AND (
+            NRIC_Encrypted IS NULL
+         OR ContactNumber_Encrypted IS NULL
+         OR Email_Encrypted IS NULL
+         OR Address_Encrypted IS NULL
+         OR @ClientID IS NOT NULL      -- explicit refresh for one client
+          );
+
+    DECLARE @Rows INT = @@ROWCOUNT;
+
+    CLOSE SYMMETRIC KEY EMS_ClientDataSymmetricKey;
+
+    PRINT 'Rows re-encrypted: ' + CAST(@Rows AS VARCHAR(10));
+END;
+GO
+
+
+
+-- ------------------------------------------------------------------------
+-- Who may decrypt?
+--
+-- role_Admin  - business owners of client data, needed for daily service.
+-- role_DBA    - needed for data-recovery and key-rotation duties.
+-- Everyone else (PropMgmtDev, ClientPortalDev, Analyst, ReadOnly) has NO
+-- route to plaintext at all: they were never granted EXECUTE, and the
+-- ciphertext columns are meaningless without the key.
+-- ------------------------------------------------------------------------
+GRANT EXECUTE ON dbo.usp_GetClientSensitiveData TO role_Admin;
+GRANT EXECUTE ON dbo.usp_GetClientSensitiveData TO role_DBA;
+GRANT EXECUTE ON dbo.usp_GetLeaseDocumentPath   TO role_Admin;
+GRANT EXECUTE ON dbo.usp_GetLeaseDocumentPath   TO role_DBA;
+GRANT EXECUTE ON dbo.usp_EncryptClientPII       TO role_Admin;
+GRANT EXECUTE ON dbo.usp_EncryptClientPII       TO role_DBA;
+GRANT EXECUTE ON dbo.usp_RecordLogout           TO role_Admin;
+GRANT EXECUTE ON dbo.usp_ReportSuspiciousLogins TO role_DBA;
+GO
+
+-- Explicit DENY on the decryption doors for the developer/reporting roles.
+-- They have no EXECUTE anyway, but an explicit DENY documents the intent in
+-- sys.database_permissions and cannot be undone by a future role grant.
+DENY EXECUTE ON dbo.usp_GetClientSensitiveData TO role_PropMgmtDev;
+DENY EXECUTE ON dbo.usp_GetClientSensitiveData TO role_ClientPortalDev;
+DENY EXECUTE ON dbo.usp_GetClientSensitiveData TO role_Analyst;
+DENY EXECUTE ON dbo.usp_GetClientSensitiveData TO role_ReadOnly;
+DENY EXECUTE ON dbo.usp_GetLeaseDocumentPath   TO role_Analyst;
+DENY EXECUTE ON dbo.usp_GetLeaseDocumentPath   TO role_ReadOnly;
+GO
+
+-- ------------------------------------------------------------------------
+-- Ad-hoc key access for DBAs only.
+--
+-- The procedures above are the normal route. A DBA also needs to be able to
+-- open the key directly during a disaster-recovery or key-rotation exercise,
+-- which requires VIEW DEFINITION on the key and CONTROL on the certificate
+-- that protects it. This is granted to role_DBA and to nobody else.
+-- ------------------------------------------------------------------------
+GRANT VIEW DEFINITION ON SYMMETRIC KEY::EMS_ClientDataSymmetricKey TO role_DBA;
+GRANT CONTROL ON CERTIFICATE::EMS_DataProtectionCertificate        TO role_DBA;
+GO
+
+PRINT 'Controlled decryption path created (procedures + grants).';
+GO
+
+
+
+/* ========================================================================
+   OPTIONAL HARDENING - REMOVING THE PLAINTEXT DUPLICATES
+
+   Right now each protected column exists TWICE: the readable original
+   (protected by masking) and the ciphertext copy (protected by the key).
+   That is intentional in this submission, because the masking requirement
+   has to be demonstrable on the same tables - but it does mean the
+   encryption is defence-in-depth rather than true encryption-at-rest,
+   since the plain value is still on the data page and still lands in the
+   AuditLog JSON.
+
+   If the requirement is TRUE encryption-at-rest, un-comment the block
+   below. Run it only AFTER the encryption UPDATE above has populated the
+   ciphertext, and note the follow-on work it forces:
+     - vw_ClientDirectory must stop selecting NRIC
+     - usp_ManageClient must call usp_EncryptClientPII instead of writing
+       the plain column
+     - the masking block for Clients.NRIC / LeaseAgreements.AgreementDocPath
+       becomes redundant and should be deleted
+     - test cases B2, C5, C6, C7 must select ContactNumber/Email instead
+       of NRIC
+   ------------------------------------------------------------------------
+   ALTER TABLE dbo.Clients         DROP COLUMN NRIC;
+   ALTER TABLE dbo.LeaseAgreements DROP COLUMN AgreementDocPath;
+   GO
+   ======================================================================== */
 
 
 
@@ -2363,11 +3006,82 @@ GO
 EXEC master.dbo.xp_create_subdir 'C:\EMS_Backups';
 GO
 
-
+-- Separate folder for key material. In production this would live on
+-- different media with different access control from the .bak files - if an
+-- attacker steals one folder they must not automatically get the other.
+EXEC master.dbo.xp_create_subdir 'C:\EMS_Backups\Keys';
+GO
 
 
 /* ========================================================================
-   REQUIREMENT 8: BACKUPS
+   REQUIREMENT 8 (part 1): BACKING UP THE KEY MATERIAL
+
+   THIS IS THE STEP THAT MOST BACKUP PLANS FORGET.
+
+   Clients.NRIC_Encrypted and the other ciphertext columns can only be read
+   with the certificate EMS_DataProtectionCertificate, which is itself
+   protected by the Database Master Key. Restore GreenAcresEMS_FULL.bak onto
+   a DIFFERENT instance and the certificate does not exist there - the
+   restored ciphertext is permanently unreadable. A backup you cannot
+   decrypt is not a backup.
+
+   So we export three things, and they must be kept SAFE and SEPARATE from
+   the database backups:
+     1. the certificate (public part)     -> .cer
+     2. its private key                   -> .pvk, protected by a password
+     3. the database master key            -> .key, protected by a password
+
+   RECOVERY ON A NEW INSTANCE - the order matters:
+     RESTORE DATABASE GreenAcresEMS FROM DISK = '...FULL.bak' WITH ...;
+     USE GreenAcresEMS;
+     -- if the master key did not come across, restore it first:
+     RESTORE MASTER KEY FROM FILE = 'C:\EMS_Backups\Keys\EMS_MasterKey.key'
+         DECRYPTION BY PASSWORD = '<the export password below>'
+         ENCRYPTION BY PASSWORD = '<new DMK password>';
+     OPEN MASTER KEY DECRYPTION BY PASSWORD = '<new DMK password>';
+     -- then the certificate, if it is missing:
+     CREATE CERTIFICATE EMS_DataProtectionCertificate
+         FROM FILE = 'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate.cer'
+         WITH PRIVATE KEY (
+             FILE = 'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate.pvk',
+             DECRYPTION BY PASSWORD = '<the export password below>');
+   ======================================================================== */
+USE GreenAcresEMS;
+GO
+
+-- The master key must be open before it can be exported.
+OPEN MASTER KEY DECRYPTION BY PASSWORD = 'EMS_MasterKey_StrongPassword_2026!';
+GO
+
+-- 1 + 2. Export the certificate together with its private key.
+--        Without the private key the .cer file cannot decrypt anything.
+BACKUP CERTIFICATE EMS_DataProtectionCertificate
+    TO FILE = 'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate.cer'
+    WITH PRIVATE KEY (
+        FILE = 'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate.pvk',
+        ENCRYPTION BY PASSWORD = 'CertPrivateKey_Export_2026!'
+    );
+GO
+
+-- 3. Export the Database Master Key itself.
+BACKUP MASTER KEY
+    TO FILE = 'C:\EMS_Backups\Keys\EMS_MasterKey.key'
+    ENCRYPTION BY PASSWORD = 'MasterKey_Export_2026!';
+GO
+
+CLOSE MASTER KEY;
+GO
+
+PRINT 'Certificate, private key and database master key exported to C:\EMS_Backups\Keys.';
+PRINT 'REMINDER: store these off-site and NOT in the same folder as the .bak files.';
+GO
+
+USE master;
+GO
+
+
+/* ========================================================================
+   REQUIREMENT 8 (part 2): DATABASE BACKUPS
    ======================================================================== */
 BACKUP DATABASE GreenAcresEMS
 TO DISK = 'C:\EMS_Backups\GreenAcresEMS_FULL.bak'
@@ -2382,10 +3096,10 @@ WITH
 GO
 
 
-
-
 /* ========================================================================
-   REQUIREMENT 8: BACKUPS
+   REQUIREMENT 8 (part 2 continued): DIFFERENTIAL BACKUP
+   Captures only what changed since the last FULL backup, so the daily
+   window stays short. Restoring needs FULL + the latest DIFFERENTIAL.
    ======================================================================== */
 BACKUP DATABASE GreenAcresEMS
 TO DISK = 'C:\EMS_Backups\GreenAcresEMS_DIFF.bak'
@@ -2444,6 +3158,183 @@ ORDER BY bs.backup_start_date DESC;
 GO
 
 
+/* ========================================================================
+   REQUIREMENT 8 (part 3): PROVING THE RESTORE ACTUALLY WORKS
+
+   An untested backup is only a hope. This section performs a real recovery
+   so the client can see the Availability side of CIA being met.
+
+   SAFETY: we restore into a SEPARATE copy of the database called
+   GreenAcresEMS_Restore, using WITH MOVE to place its files in the same
+   data folder under new names. The live GreenAcresEMS is never touched, so
+   this can be demonstrated on camera without risk.
+
+   The chain must be applied in this exact order:
+       FULL  (NORECOVERY)  ->  DIFFERENTIAL (NORECOVERY)  ->  LOG (RECOVERY)
+   NORECOVERY leaves the database "restoring" so more backups can be added.
+   Only the final step brings it online.
+   ======================================================================== */
+USE master;
+GO
+
+-- Discover where this instance keeps its data files, so the MOVE below works
+-- on any machine instead of a hard-coded C:\Program Files\... path.
+DECLARE @DataPath NVARCHAR(500) = CAST(SERVERPROPERTY('InstanceDefaultDataPath') AS NVARCHAR(500));
+DECLARE @LogPath  NVARCHAR(500) = CAST(SERVERPROPERTY('InstanceDefaultLogPath')  AS NVARCHAR(500));
+PRINT 'Data path : ' + ISNULL(@DataPath, '(unknown)');
+PRINT 'Log path  : ' + ISNULL(@LogPath,  '(unknown)');
+PRINT 'Use the logical/physical names listed by RESTORE FILELISTONLY above.';
+GO
+
+-- Remove a previous rehearsal copy if one is left over.
+IF DB_ID('GreenAcresEMS_Restore') IS NOT NULL
+BEGIN
+    ALTER DATABASE GreenAcresEMS_Restore SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+    DROP DATABASE GreenAcresEMS_Restore;
+    PRINT 'Dropped previous GreenAcresEMS_Restore copy.';
+END;
+GO
+
+-- ------------------------------------------------------------------------
+-- Step 1 of 3: restore the FULL backup, leaving the copy offline
+--              (NORECOVERY) so the differential can follow.
+--
+-- The two MOVE clauses are built dynamically from the default data/log
+-- paths, so this runs unchanged on the lecturer's machine. The logical file
+-- names 'GreenAcresEMS' and 'GreenAcresEMS_log' are the SQL Server defaults
+-- for a database created with a bare CREATE DATABASE, as ours was - confirm
+-- them with RESTORE FILELISTONLY if the restore complains.
+-- ------------------------------------------------------------------------
+DECLARE @DataPath NVARCHAR(500) = CAST(SERVERPROPERTY('InstanceDefaultDataPath') AS NVARCHAR(500));
+DECLARE @LogPath  NVARCHAR(500) = CAST(SERVERPROPERTY('InstanceDefaultLogPath')  AS NVARCHAR(500));
+DECLARE @sql      NVARCHAR(MAX);
+
+SET @sql = N'
+RESTORE DATABASE GreenAcresEMS_Restore
+FROM DISK = ''C:\EMS_Backups\GreenAcresEMS_FULL.bak''
+WITH
+    MOVE ''GreenAcresEMS''     TO ''' + @DataPath + N'GreenAcresEMS_Restore.mdf'',
+    MOVE ''GreenAcresEMS_log'' TO ''' + @LogPath  + N'GreenAcresEMS_Restore_log.ldf'',
+    NORECOVERY,
+    REPLACE,
+    STATS = 10;';
+
+PRINT @sql;
+EXEC sys.sp_executesql @sql;
+GO
+
+-- ------------------------------------------------------------------------
+-- Step 2 of 3: apply the DIFFERENTIAL, still NORECOVERY.
+-- ------------------------------------------------------------------------
+RESTORE DATABASE GreenAcresEMS_Restore
+FROM DISK = 'C:\EMS_Backups\GreenAcresEMS_DIFF.bak'
+WITH NORECOVERY, STATS = 10;
+GO
+
+-- ------------------------------------------------------------------------
+-- Step 3 of 3: apply the LOG and bring the database online.
+--
+-- WITH RECOVERY = "no more backups are coming, open the database".
+-- ------------------------------------------------------------------------
+RESTORE LOG GreenAcresEMS_Restore
+FROM DISK = 'C:\EMS_Backups\GreenAcresEMS_LOG.trn'
+WITH RECOVERY, STATS = 10;
+GO
+
+PRINT 'Restore rehearsal complete: GreenAcresEMS_Restore is online.';
+GO
+
+-- ------------------------------------------------------------------------
+-- Post-restore verification: does the recovered copy actually hold the
+-- data? Compare row counts side by side. Every pair must match.
+-- ------------------------------------------------------------------------
+SELECT 'Properties'  AS TableName,
+       (SELECT COUNT(*) FROM GreenAcresEMS.dbo.Properties)          AS LiveRows,
+       (SELECT COUNT(*) FROM GreenAcresEMS_Restore.dbo.Properties)  AS RestoredRows
+UNION ALL
+SELECT 'Clients',
+       (SELECT COUNT(*) FROM GreenAcresEMS.dbo.Clients),
+       (SELECT COUNT(*) FROM GreenAcresEMS_Restore.dbo.Clients)
+UNION ALL
+SELECT 'Transactions',
+       (SELECT COUNT(*) FROM GreenAcresEMS.dbo.Transactions),
+       (SELECT COUNT(*) FROM GreenAcresEMS_Restore.dbo.Transactions)
+UNION ALL
+SELECT 'LeaseAgreements',
+       (SELECT COUNT(*) FROM GreenAcresEMS.dbo.LeaseAgreements),
+       (SELECT COUNT(*) FROM GreenAcresEMS_Restore.dbo.LeaseAgreements)
+UNION ALL
+SELECT 'CommissionPayments',
+       (SELECT COUNT(*) FROM GreenAcresEMS.dbo.CommissionPayments),
+       (SELECT COUNT(*) FROM GreenAcresEMS_Restore.dbo.CommissionPayments);
+GO
+
+-- Confirm the encrypted data survived the restore as ciphertext.
+-- (It cannot be DECRYPTED in the copy until the certificate is available
+-- there - which is exactly why the key backup section above exists.)
+SELECT TOP 3
+    ClientID,
+    FullName,
+    NRIC_Encrypted AS StillEncryptedAfterRestore
+FROM GreenAcresEMS_Restore.dbo.Clients;
+GO
+
+
+/* ========================================================================
+   POINT-IN-TIME RECOVERY (the "someone deleted the wrong rows" scenario)
+
+   FULL recovery model + log backups let us roll forward to a specific
+   second, stopping just BEFORE a mistake. Run these one block at a time.
+
+   1. Note the time now - this is our "known good" point:
+          SELECT GETDATE() AS KnownGoodTime;
+
+   2. Simulate the accident on the live database, e.g.
+          UPDATE dbo.Properties SET Price = 1 WHERE PropertyID <= 5;
+
+   3. Take a tail-log backup so nothing committed is lost:
+          BACKUP LOG GreenAcresEMS
+          TO DISK = 'C:\EMS_Backups\GreenAcresEMS_TAIL.trn'
+          WITH NORECOVERY, NAME = 'Tail-log before point-in-time recovery';
+
+   4. Restore the full backup with NORECOVERY (as in Step 1 above), then
+      roll the log forward only as far as the known-good time:
+          RESTORE LOG GreenAcresEMS_Restore
+          FROM DISK = 'C:\EMS_Backups\GreenAcresEMS_LOG.trn'
+          WITH STOPAT = '2026-07-30 14:35:00', RECOVERY;
+
+   5. Verify the rows are back to their pre-accident values, then copy the
+      corrected rows across, or rename the databases to swap them.
+
+   Written out rather than executed because STOPAT needs a real timestamp
+   from the demo, and because step 3 deliberately takes the live database
+   offline - not something a build script should ever do on its own.
+   ======================================================================== */
+
+-- COPY_ONLY backup: an ad-hoc backup (before a risky deployment, say) that
+-- does NOT reset the differential base, so the scheduled backup chain above
+-- keeps working normally.
+BACKUP DATABASE GreenAcresEMS
+TO DISK = 'C:\EMS_Backups\GreenAcresEMS_COPYONLY.bak'
+WITH COPY_ONLY, INIT, CHECKSUM, COMPRESSION,
+     NAME = 'GreenAcresEMS-Ad-hoc copy-only backup',
+     DESCRIPTION = 'Taken before a change; does not break the differential chain';
+GO
+
+-- Corruption watch: this table should always be EMPTY. Any row here means
+-- SQL Server met a damaged page and the backups need to be relied on.
+SELECT * FROM msdb.dbo.suspect_pages;
+GO
+
+-- Confirm the recovery model is still FULL. In SIMPLE recovery, log backups
+-- are impossible and point-in-time recovery cannot be offered at all.
+SELECT
+    name             AS DatabaseName,
+    recovery_model_desc,
+    log_reuse_wait_desc
+FROM sys.databases
+WHERE name IN ('GreenAcresEMS', 'GreenAcresEMS_Restore');
+GO
 
 
 PRINT 'Backup and recovery objects/steps set up successfully.';
@@ -2481,7 +3372,7 @@ BEGIN
         EventTime       DATETIME NOT NULL DEFAULT GETDATE(),
         TableName       NVARCHAR(128) NOT NULL,
         OperationType   NVARCHAR(10) NOT NULL
-            CONSTRAINT CK_Audit_Op CHECK (OperationType IN ('INSERT','UPDATE','DELETE')),
+            CONSTRAINT CK_Audit_Op CHECK (OperationType IN ('INSERT','UPDATE','DELETE','SELECT')),
         RecordID        NVARCHAR(50) NOT NULL,
         ChangedBy       NVARCHAR(100) NOT NULL DEFAULT SYSTEM_USER,
         OldValues       NVARCHAR(MAX) NULL,
@@ -2582,8 +3473,24 @@ BEGIN
 END;
 GO
 
+-- ------------------------------------------------------------------------
 -- Only DBA/Admin should read the audit trail directly.
--- Normal developer roles should not be able to change or delete audit evidence.
+-- Normal developer roles should not be able to change or delete audit
+-- evidence.
+--
+-- CLASSIFY THE AUDIT LOG AS SENSITIVE DATA IN ITS OWN RIGHT.
+-- The OldValues / NewValues columns hold a JSON snapshot of the whole
+-- changed row, so a client's contact number and address are written into
+-- AuditLog in the clear, and Dynamic Data Masking does NOT follow them
+-- there - a mask protects Clients.Email, not a JSON string that happens to
+-- contain the same characters. AuditLog is therefore at least as sensitive
+-- as the tables it watches, and it is deliberately readable only by
+-- role_DBA and role_Admin (both of which already hold UNMASK anyway), with
+-- an explicit DENY for every other role below.
+--
+-- The SystemUsers trigger goes further and lists its columns explicitly so
+-- that credential material is never copied into the log at all.
+-- ------------------------------------------------------------------------
 IF DATABASE_PRINCIPAL_ID('role_DBA') IS NOT NULL
 BEGIN
     GRANT SELECT ON dbo.AuditLog TO role_DBA;
@@ -2745,6 +3652,183 @@ FROM sys.database_audit_specifications
 WHERE name = 'GA_EMS_DatabaseAuditSpec';
 GO
 
+
+/* ========================================================================
+   REQUIREMENT 9 & 10 (continued): LOGIN HISTORY IN dbo.UserLoginLog
+
+   The Server Audit above writes to .sqlaudit FILES, which are excellent
+   tamper-resistant evidence but awkward to query from the application and
+   impossible to join to our own SystemUsers table. dbo.UserLoginLog is the
+   in-database companion: queryable, joinable, and reportable.
+
+   Two feeds populate it:
+     a) usp_VerifySystemUserPassword - application-level EMS logins
+        (already wired up in the hashing section above).
+     b) the LOGON trigger below      - real SQL Server connections.
+
+   WHY A LOGON TRIGGER NEEDS CARE:
+   A logon trigger runs for EVERY connection to the instance. If it throws
+   an unhandled error, SQL Server denies the login - including yours - and
+   you are locked out of your own server. This implementation is therefore
+   defensive:
+     * the whole body sits inside TRY/CATCH, and the CATCH block does
+       nothing, so a logging failure can never block a login;
+     * it only writes a row for logins the EMS actually knows about, so it
+       adds no measurable cost to other connections;
+     * it is created WITH EXECUTE AS 'sa' because the connecting principal
+       will not have INSERT permission on GreenAcresEMS.dbo.UserLoginLog.
+
+   IF YOU DO GET LOCKED OUT: start sqlcmd with the -A switch (admin
+   connection), which bypasses logon triggers, then run
+       DISABLE TRIGGER trg_ServerLogon_AuditLogin ON ALL SERVER;
+   ======================================================================== */
+USE master;
+GO
+
+-- Drop first so this script stays re-runnable.
+IF EXISTS (SELECT 1 FROM sys.server_triggers WHERE name = 'trg_ServerLogon_AuditLogin')
+BEGIN
+    DROP TRIGGER trg_ServerLogon_AuditLogin ON ALL SERVER;
+    PRINT 'Existing logon trigger dropped.';
+END;
+GO
+
+-- Only create the trigger if we can impersonate 'sa' to do the write.
+IF EXISTS (SELECT 1 FROM sys.server_principals WHERE name = 'sa' AND type = 'S')
+BEGIN
+    EXEC('
+    CREATE TRIGGER trg_ServerLogon_AuditLogin
+    ON ALL SERVER
+    WITH EXECUTE AS ''sa''
+    FOR LOGON
+    AS
+    BEGIN
+        SET NOCOUNT ON;
+
+        BEGIN TRY
+            DECLARE @LoginName NVARCHAR(100) = ORIGINAL_LOGIN();
+
+            -- Only log principals that belong to the EMS. Everything else
+            -- (sa, service accounts, the lecturer''s own login) is ignored
+            -- so this trigger stays cheap and quiet.
+            IF EXISTS (
+                SELECT 1
+                FROM GreenAcresEMS.dbo.SystemUsers
+                WHERE LoginName = @LoginName
+            )
+            BEGIN
+                INSERT INTO GreenAcresEMS.dbo.UserLoginLog
+                    (SystemUserID, LoginName, LoginTime, IsSuccessful,
+                     IPAddress, HostName, FailureReason)
+                SELECT
+                    su.SystemUserID,
+                    @LoginName,
+                    GETDATE(),
+                    1,                       -- a logon trigger only fires on success
+                    CONVERT(NVARCHAR(50), CONNECTIONPROPERTY(''client_net_address'')),
+                    HOST_NAME(),
+                    NULL
+                FROM GreenAcresEMS.dbo.SystemUsers su
+                WHERE su.LoginName = @LoginName;
+            END;
+        END TRY
+        BEGIN CATCH
+            -- Deliberately swallowed. Never block a login because auditing
+            -- failed; the Server Audit file remains the primary evidence.
+            -- (This also keeps logins working while GreenAcresEMS is being
+            -- dropped, restored or taken offline.)
+            DECLARE @Ignored NVARCHAR(4000) = ERROR_MESSAGE();
+        END CATCH;
+    END;
+    ');
+    PRINT 'Logon trigger trg_ServerLogon_AuditLogin created.';
+END
+ELSE
+BEGIN
+    PRINT 'WARNING: login ''sa'' not found - logon trigger NOT created.';
+    PRINT 'Application logins are still recorded by usp_VerifySystemUserPassword,';
+    PRINT 'and failed server logins are still captured by the Server Audit.';
+END;
+GO
+
+USE GreenAcresEMS;
+GO
+
+-- ------------------------------------------------------------------------
+-- vw_ServerLoginAudit
+--
+-- Reads the FAILED and SUCCESSFUL login events straight out of the audit
+-- files. A logon trigger cannot see failed logins (the connection is
+-- rejected before it fires), so this view is what completes the picture.
+--
+-- NOTE: sys.fn_get_audit_file requires CONTROL SERVER, so this view is
+-- readable by sysadmins only. It is not granted to role_DBA because doing
+-- so would not work - the permission is checked at the function, not the
+-- view.
+-- ------------------------------------------------------------------------
+CREATE OR ALTER VIEW dbo.vw_ServerLoginAudit
+AS
+    SELECT TOP 1000
+        event_time                  AS EventTime,
+        action_id                   AS ActionID,
+        succeeded                   AS Succeeded,
+        server_principal_name       AS LoginName,
+        client_ip                   AS ClientIP,
+        application_name            AS ApplicationName,
+        host_name                   AS HostName,
+        statement                   AS StatementText
+    FROM sys.fn_get_audit_file('C:\SQLAudit\GA_EMS_ServerAudit*.sqlaudit', DEFAULT, DEFAULT)
+    WHERE action_id IN ('LGIS', 'LGIF')   -- LGIS = login succeeded, LGIF = failed
+    ORDER BY event_time DESC;
+GO
+
+-- ------------------------------------------------------------------------
+-- vw_LoginHistory
+--
+-- The in-database login history, joined to the staff record and department
+-- so the DBA can answer "who was connected, from where, and when" without
+-- opening an audit file.
+-- ------------------------------------------------------------------------
+CREATE OR ALTER VIEW dbo.vw_LoginHistory
+AS
+    SELECT
+        ull.LogID,
+        ull.LoginName,
+        su.FullName,
+        d.DepartmentName,
+        su.UserRole,
+        ull.LoginTime,
+        ull.LogoutTime,
+        DATEDIFF(MINUTE, ull.LoginTime, ISNULL(ull.LogoutTime, GETDATE()))
+            AS SessionMinutes,
+        ull.IsSuccessful,
+        ull.IPAddress,
+        ull.HostName,
+        ull.FailureReason
+    FROM dbo.UserLoginLog AS ull
+    LEFT JOIN dbo.SystemUsers AS su ON su.SystemUserID = ull.SystemUserID
+    LEFT JOIN dbo.Departments AS d  ON d.DepartmentID  = su.DepartmentID;
+GO
+
+-- Login history is audit evidence: DBA and Admin may read it, the
+-- developer/reporting roles may not (they could otherwise profile who works
+-- when, and confirm which accounts exist).
+GRANT SELECT ON dbo.vw_LoginHistory TO role_DBA;
+GRANT SELECT ON dbo.vw_LoginHistory TO role_Admin;
+GO
+
+DENY SELECT ON dbo.UserLoginLog TO role_PropMgmtDev;
+DENY SELECT ON dbo.UserLoginLog TO role_ClientPortalDev;
+DENY SELECT ON dbo.UserLoginLog TO role_Analyst;
+DENY SELECT ON dbo.UserLoginLog TO role_ReadOnly;
+GO
+
+GRANT SELECT ON dbo.UserLoginLog TO role_DBA;
+GO
+
+PRINT 'Login auditing wired up: logon trigger + UserLoginLog + reporting views.';
+GO
+
 PRINT 'Auditing setup completed. Next: run the trigger script and auditing_testcases.sql.';
 GO
 
@@ -2758,8 +3842,12 @@ GO
 --   1. Compiled SQL file.sql
 --   2. 08_auditing.sql
 -- Security note:
---   The SystemUsers trigger intentionally excludes PasswordHash and
---   PasswordSalt. Credential material must not be copied into logs.
+--   The SystemUsers trigger lists its columns EXPLICITLY (never i.* / d.*)
+--   so that no credential column can ever be copied into the audit log -
+--   not the legacy PasswordHash/PasswordSalt, and not the current
+--   PasswordHashSecure/PasswordSaltSecure either. An audit trail that
+--   contains password material is a credential store with weaker
+--   protection than the table it came from.
 
 USE GreenAcresEMS;
 GO
@@ -3017,7 +4105,9 @@ BEGIN
 END;
 GO
 
--- PasswordHash and PasswordSalt are deliberately excluded.
+-- Columns are listed one by one on purpose: every credential column
+-- (PasswordHashSecure, PasswordSaltSecure, PasswordHashAlgorithm) is
+-- deliberately excluded so hashes and salts never reach dbo.AuditLog.
 CREATE OR ALTER TRIGGER dbo.trg_SystemUsers_Audit
 ON dbo.SystemUsers
 WITH EXECUTE AS OWNER

@@ -12,6 +12,8 @@
      SECTION A - Auditing & Operational Triggers   (Sarvein)
      SECTION B - Data Protection (Masking/Encryption/Hashing) (Irfan)
      SECTION C - Access Control (Roles/Users/Views/Procedures) (Rama)
+     SECTION D - Backup, Recovery & Availability
+     SECTION E - Login Auditing (UserLoginLog + logon trigger)
 
    How to run:
      1. Make sure the main build scripts have already been run first
@@ -427,6 +429,173 @@ WHERE object_id = OBJECT_ID('dbo.SystemUsers')
 GO
 
 
+-- ----------------------------------------------------------------
+-- B9: The old, weaker credential columns are GONE
+-- Expected: 0 rows. PasswordHash (SHA2_256) and PasswordSalt
+--           (plain-text salt) were dropped once the salted
+--           SHA2_512 columns took over, so there is no second,
+--           weaker credential store left to attack.
+-- ----------------------------------------------------------------
+SELECT name AS LegacyCredentialColumnStillPresent
+FROM sys.columns
+WHERE object_id = OBJECT_ID('dbo.SystemUsers')
+  AND name IN ('PasswordHash', 'PasswordSalt');
+GO
+
+
+-- ----------------------------------------------------------------
+-- B10: Controlled decryption THROUGH the stored procedure
+-- Expected: Readable NRIC / ContactNumber / Email / Address for
+--           ClientID 1. The procedure is WITH EXECUTE AS OWNER, so
+--           it - not the caller - opens the symmetric key. The
+--           caller never touches the certificate.
+-- ----------------------------------------------------------------
+EXEC dbo.usp_GetClientSensitiveData
+    @ClientID = 1,
+    @Reason   = 'Test case B10 - verifying controlled decryption path';
+GO
+
+-- The access itself is audit evidence: this call must appear in
+-- AuditLog as a SELECT/DECRYPT_READ event naming the real login.
+-- Expected: at least one row, ChangedBy = your login, and the
+--           NewValues JSON contains "DECRYPT_READ" plus the reason.
+SELECT TOP 5
+    AuditID, EventTime, TableName, OperationType,
+    RecordID, ChangedBy, NewValues
+FROM dbo.AuditLog
+WHERE TableName = 'Clients'
+  AND OperationType = 'SELECT'
+ORDER BY AuditID DESC;
+GO
+
+
+-- ----------------------------------------------------------------
+-- B11: Decrypting the lease document path through its procedure
+-- Expected: The readable 'docs/leases/LA-TR002.pdf' style path.
+-- ----------------------------------------------------------------
+DECLARE @AnyLeaseID INT = (SELECT MIN(LeaseID) FROM dbo.LeaseAgreements);
+EXEC dbo.usp_GetLeaseDocumentPath @LeaseID = @AnyLeaseID;
+GO
+
+
+-- ----------------------------------------------------------------
+-- B12: A developer role CANNOT reach the decryption door
+-- Expected: 'PASS' for both. vijay.menon (role_ClientPortalDev) is
+--           explicitly DENIED execute, and he cannot open the
+--           symmetric key by hand either, because CONTROL on the
+--           certificate was granted to role_DBA only.
+--           This is the test that proves encryption is a real
+--           boundary and not just stored ciphertext.
+-- ----------------------------------------------------------------
+EXECUTE AS USER = 'vijay.menon';
+    BEGIN TRY
+        EXEC dbo.usp_GetClientSensitiveData @ClientID = 1;
+        PRINT 'FAIL: ClientPortalDev decrypted client PII.';
+    END TRY
+    BEGIN CATCH
+        PRINT 'PASS: Decryption procedure denied -> ' + ERROR_MESSAGE();
+    END CATCH;
+REVERT;
+GO
+
+EXECUTE AS USER = 'vijay.menon';
+    BEGIN TRY
+        OPEN SYMMETRIC KEY EMS_ClientDataSymmetricKey
+            DECRYPTION BY CERTIFICATE EMS_DataProtectionCertificate;
+        PRINT 'FAIL: ClientPortalDev opened the symmetric key directly.';
+        CLOSE SYMMETRIC KEY EMS_ClientDataSymmetricKey;
+    END TRY
+    BEGIN CATCH
+        PRINT 'PASS: Key access denied -> ' + ERROR_MESSAGE();
+    END CATCH;
+REVERT;
+GO
+
+
+-- ----------------------------------------------------------------
+-- B13: New data added later is encrypted too
+-- Expected: The new client starts with NULL ciphertext, and after
+--           usp_EncryptClientPII the ciphertext columns are
+--           populated. This proves encryption covers ongoing
+--           operations, not only the rows that existed at build
+--           time.
+-- ----------------------------------------------------------------
+EXEC dbo.usp_ManageClient
+    @FullName      = 'B13 Encryption Coverage Test',
+    @NRIC          = '900101101234',
+    @ContactNumber = '012-3330000',
+    @Email         = 'b13.test@example.com',
+    @Address       = 'Test Address, Kuala Lumpur';
+GO
+
+DECLARE @NewClientID INT =
+    (SELECT MAX(ClientID) FROM dbo.Clients
+     WHERE FullName = 'B13 Encryption Coverage Test');
+
+SELECT 'Before' AS Stage, ClientID, FullName, NRIC_Encrypted
+FROM dbo.Clients WHERE ClientID = @NewClientID;
+
+EXEC dbo.usp_EncryptClientPII @ClientID = @NewClientID;
+
+SELECT 'After' AS Stage, ClientID, FullName, NRIC_Encrypted
+FROM dbo.Clients WHERE ClientID = @NewClientID;
+
+-- Tidy up so repeated runs do not pile up test rows.
+DELETE FROM dbo.Clients WHERE ClientID = @NewClientID;
+GO
+
+
+-- ----------------------------------------------------------------
+-- B14: The masking limit we documented, proved
+-- Expected: MaskedRead shows a masked/random value while
+--           RealTotal returns a genuine figure. This demonstrates
+--           on purpose that Dynamic Data Masking does not mask
+--           AGGREGATES, which is why masking sits behind
+--           permissions and auditing and is never the only control.
+-- ----------------------------------------------------------------
+EXECUTE AS USER = 'jason.lim';          -- role_ReadOnly, no UNMASK
+    SELECT TOP 3
+        'MaskedRead' AS TestPart,
+        MonthlyRent  AS MaskedValue
+    FROM vw_ActiveLeases;
+REVERT;
+GO
+
+EXECUTE AS USER = 'nurul.huda';         -- role_ReadOnly, no UNMASK
+    BEGIN TRY
+        SELECT 'RealTotal' AS TestPart,
+               SUM(MonthlyRent) AS AggregateOverMaskedColumn
+        FROM vw_ActiveLeases;
+    END TRY
+    BEGIN CATCH
+        PRINT 'Aggregate blocked -> ' + ERROR_MESSAGE();
+    END CATCH;
+REVERT;
+GO
+
+
+-- ----------------------------------------------------------------
+-- B15: Analyst UNMASK is explicit and column-level (SQL 2022+)
+-- Expected: On SQL Server 2022 or newer, role_Analyst holds UNMASK
+--           on financial columns ONLY - never on a PII column.
+--           On SQL Server 2019 this returns no rows, which is the
+--           documented fallback.
+-- ----------------------------------------------------------------
+SELECT
+    dp.permission_name,
+    OBJECT_NAME(dp.major_id) AS TableName,
+    c.name                   AS ColumnName,
+    pr.name                  AS GrantedTo
+FROM sys.database_permissions AS dp
+JOIN sys.database_principals AS pr ON pr.principal_id = dp.grantee_principal_id
+LEFT JOIN sys.columns AS c
+       ON c.object_id = dp.major_id
+      AND c.column_id = dp.minor_id
+WHERE dp.permission_name = 'UNMASK'
+ORDER BY pr.name, TableName, ColumnName;
+GO
+
+
 
 /* ================================================================
    SECTION C: ACCESS CONTROL (ROLES / USERS / VIEWS / PROCEDURES)
@@ -668,6 +837,114 @@ END TRY
 BEGIN CATCH
     PRINT 'PASS: NULL parameter rejected -> ' + ERROR_MESSAGE();
 END CATCH;
+GO
+
+
+-- ----------------------------------------------------------------
+-- C17: usp_ProvisionUser resists SQL injection
+-- Expected: 'PASS' - the login name is rejected by the character
+--           whitelist before any dynamic SQL is built, and
+--           dbo.Clients is untouched.
+--           These procedures have to build dynamic SQL (CREATE
+--           LOGIN cannot take a parameter), so this test proves the
+--           QUOTENAME + whitelist hardening actually holds.
+-- ----------------------------------------------------------------
+DECLARE @ClientsBefore INT = (SELECT COUNT(*) FROM dbo.Clients);
+
+BEGIN TRY
+    EXEC dbo.usp_ProvisionUser
+        @LoginName = 'evil];DROP TABLE dbo.Clients--',
+        @Password  = 'Injected@Password2026',
+        @RoleName  = 'role_ReadOnly';
+    PRINT 'FAIL: injected login name was accepted.';
+END TRY
+BEGIN CATCH
+    PRINT 'PASS: injection rejected -> ' + ERROR_MESSAGE();
+END CATCH;
+
+-- The table must still be there with the same number of rows.
+IF OBJECT_ID('dbo.Clients', 'U') IS NULL
+    PRINT 'FAIL: dbo.Clients was dropped!';
+ELSE IF (SELECT COUNT(*) FROM dbo.Clients) = @ClientsBefore
+    PRINT 'PASS: dbo.Clients intact, row count unchanged.';
+ELSE
+    PRINT 'FAIL: dbo.Clients row count changed.';
+GO
+
+
+-- ----------------------------------------------------------------
+-- C18: A short password is rejected
+-- Expected: 'PASS' - the procedure enforces a 12-character minimum
+--           before it ever reaches CREATE LOGIN.
+-- ----------------------------------------------------------------
+BEGIN TRY
+    EXEC dbo.usp_ProvisionUser
+        @LoginName = 'test.shortpw',
+        @Password  = 'abc123',
+        @RoleName  = 'role_ReadOnly';
+    PRINT 'FAIL: short password was accepted.';
+END TRY
+BEGIN CATCH
+    PRINT 'PASS: short password rejected -> ' + ERROR_MESSAGE();
+END CATCH;
+GO
+
+
+-- ----------------------------------------------------------------
+-- C19: Provisioning is a DBA duty, not a business-Admin duty
+-- Expected: 'PASS' - farid.rahman (role_Admin) has no EXECUTE on
+--           usp_ProvisionUser. If a business Admin could mint
+--           logins, they could create an account in role_DBA and
+--           escalate their own privilege.
+-- ----------------------------------------------------------------
+EXECUTE AS USER = 'farid.rahman';      -- role_Admin
+    BEGIN TRY
+        EXEC dbo.usp_ProvisionUser
+            @LoginName = 'test.escalation',
+            @Password  = 'Escalate@Test2026',
+            @RoleName  = 'role_DBA';
+        PRINT 'FAIL: role_Admin provisioned a DBA account.';
+    END TRY
+    BEGIN CATCH
+        PRINT 'PASS: provisioning denied to role_Admin -> ' + ERROR_MESSAGE();
+    END CATCH;
+REVERT;
+GO
+
+
+-- ----------------------------------------------------------------
+-- C20: Full permission matrix dump for the report
+-- Expected: One row per explicit GRANT/DENY per role. Paste this
+--           result into the Authorization Matrix section of the
+--           documentation - it is the authoritative version of the
+--           matrix, taken straight from the engine.
+-- ----------------------------------------------------------------
+SELECT
+    pr.name                             AS RoleName,
+    dp.state_desc                       AS GrantOrDeny,
+    dp.permission_name                  AS Permission,
+    CASE dp.class
+        WHEN 0 THEN 'DATABASE'
+        WHEN 1 THEN ISNULL(OBJECT_SCHEMA_NAME(dp.major_id) + '.', '')
+                    + ISNULL(OBJECT_NAME(dp.major_id), '(object)')
+        WHEN 25 THEN 'CERTIFICATE'
+        WHEN 24 THEN 'SYMMETRIC KEY'
+        ELSE dp.class_desc
+    END                                 AS SecurableName,
+    CASE
+        WHEN dp.class = 1 AND o.type_desc IS NOT NULL THEN o.type_desc
+        ELSE dp.class_desc
+    END                                 AS SecurableType,
+    c.name                              AS ColumnName
+FROM sys.database_permissions AS dp
+JOIN sys.database_principals  AS pr ON pr.principal_id = dp.grantee_principal_id
+LEFT JOIN sys.objects        AS o  ON o.object_id = dp.major_id AND dp.class = 1
+LEFT JOIN sys.columns        AS c  ON c.object_id = dp.major_id
+                                  AND c.column_id = dp.minor_id
+                                  AND dp.minor_id > 0
+WHERE pr.type = 'R'
+  AND pr.name LIKE 'role[_]%'
+ORDER BY pr.name, SecurableName, dp.permission_name;
 GO
 
 
@@ -1090,6 +1367,450 @@ ORDER BY event_time DESC;
 GO
 
 PRINT 'Auditing test cases completed.';
+GO
+
+
+
+/* ================================================================
+   SECTION D: BACKUP, RECOVERY & AVAILABILITY
+
+   Goal: Prove the Availability side of CIA. Confidentiality and
+   Integrity mean nothing if the data cannot be brought back after
+   a failure, and a backup nobody has ever restored is only a hope.
+
+   Run AFTER the backup section of the build script has executed
+   (the .bak / .trn files must already exist in C:\EMS_Backups).
+   ================================================================ */
+
+USE master;
+GO
+
+-- ----------------------------------------------------------------
+-- D1: The recovery model still allows point-in-time recovery
+-- Expected: recovery_model_desc = FULL. In SIMPLE recovery, log
+--           backups are impossible and no point-in-time restore
+--           could ever be offered to the client.
+-- ----------------------------------------------------------------
+SELECT
+    name AS DatabaseName,
+    recovery_model_desc,
+    log_reuse_wait_desc,
+    state_desc
+FROM sys.databases
+WHERE name IN ('GreenAcresEMS', 'GreenAcresEMS_Restore');
+GO
+
+
+-- ----------------------------------------------------------------
+-- D2: All three backup types were actually taken
+-- Expected: One row each for Full, Differential and Transaction
+--           Log, all for GreenAcresEMS, all with is_damaged = 0.
+-- ----------------------------------------------------------------
+SELECT
+    CASE bs.type
+        WHEN 'D' THEN 'Full'
+        WHEN 'I' THEN 'Differential'
+        WHEN 'L' THEN 'Transaction Log'
+        ELSE bs.type
+    END                                              AS BackupType,
+    bs.backup_start_date,
+    bs.backup_finish_date,
+    CAST(bs.backup_size / 1048576.0 AS DECIMAL(10,2)) AS BackupSize_MB,
+    bs.is_damaged,
+    bs.has_backup_checksums,
+    bs.is_copy_only,
+    bmf.physical_device_name
+FROM msdb.dbo.backupset AS bs
+JOIN msdb.dbo.backupmediafamily AS bmf
+     ON bmf.media_set_id = bs.media_set_id
+WHERE bs.database_name = 'GreenAcresEMS'
+ORDER BY bs.backup_start_date DESC;
+GO
+
+
+-- ----------------------------------------------------------------
+-- D3: The backup files are readable and not corrupt
+-- Expected: "The backup set on file 1 is valid." for each file.
+--           WITH CHECKSUM re-verifies the page checksums that were
+--           written during the backup.
+-- ----------------------------------------------------------------
+RESTORE VERIFYONLY FROM DISK = 'C:\EMS_Backups\GreenAcresEMS_FULL.bak' WITH CHECKSUM;
+GO
+RESTORE VERIFYONLY FROM DISK = 'C:\EMS_Backups\GreenAcresEMS_DIFF.bak' WITH CHECKSUM;
+GO
+RESTORE VERIFYONLY FROM DISK = 'C:\EMS_Backups\GreenAcresEMS_LOG.trn'  WITH CHECKSUM;
+GO
+
+
+-- ----------------------------------------------------------------
+-- D4: The KEY MATERIAL was backed up too
+-- Expected: All three files exist (FileExists = 1). This is the
+--           test that catches the classic mistake - without the
+--           certificate and its private key, every encrypted
+--           column in a restored copy is lost forever.
+-- ----------------------------------------------------------------
+DECLARE @Info TABLE (
+    Label       NVARCHAR(60),
+    FilePath    NVARCHAR(300),
+    FileExists  INT,
+    IsDirectory INT,
+    ParentDirExists INT
+);
+
+INSERT INTO @Info (FileExists, IsDirectory, ParentDirExists)
+EXEC master.dbo.xp_fileexist 'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate.cer';
+UPDATE @Info SET Label = 'Certificate (public .cer)',
+                 FilePath = 'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate.cer'
+WHERE Label IS NULL;
+
+INSERT INTO @Info (FileExists, IsDirectory, ParentDirExists)
+EXEC master.dbo.xp_fileexist 'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate.pvk';
+UPDATE @Info SET Label = 'Certificate private key (.pvk)',
+                 FilePath = 'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate.pvk'
+WHERE Label IS NULL;
+
+INSERT INTO @Info (FileExists, IsDirectory, ParentDirExists)
+EXEC master.dbo.xp_fileexist 'C:\EMS_Backups\Keys\EMS_MasterKey.key';
+UPDATE @Info SET Label = 'Database Master Key (.key)',
+                 FilePath = 'C:\EMS_Backups\Keys\EMS_MasterKey.key'
+WHERE Label IS NULL;
+
+SELECT Label AS KeyMaterial, FilePath, FileExists
+FROM @Info;
+GO
+
+
+-- ----------------------------------------------------------------
+-- D5: The restore rehearsal produced a usable database
+-- Expected: LiveRows = RestoredRows for every table. If the
+--           restored copy is missing, the restore section of the
+--           build script has not been run yet.
+-- ----------------------------------------------------------------
+IF DB_ID('GreenAcresEMS_Restore') IS NULL
+BEGIN
+    PRINT 'SKIP: GreenAcresEMS_Restore does not exist - run the restore section first.';
+END
+ELSE
+BEGIN
+    SELECT 'Properties' AS TableName,
+           (SELECT COUNT(*) FROM GreenAcresEMS.dbo.Properties)         AS LiveRows,
+           (SELECT COUNT(*) FROM GreenAcresEMS_Restore.dbo.Properties) AS RestoredRows
+    UNION ALL
+    SELECT 'Clients',
+           (SELECT COUNT(*) FROM GreenAcresEMS.dbo.Clients),
+           (SELECT COUNT(*) FROM GreenAcresEMS_Restore.dbo.Clients)
+    UNION ALL
+    SELECT 'Transactions',
+           (SELECT COUNT(*) FROM GreenAcresEMS.dbo.Transactions),
+           (SELECT COUNT(*) FROM GreenAcresEMS_Restore.dbo.Transactions)
+    UNION ALL
+    SELECT 'LeaseAgreements',
+           (SELECT COUNT(*) FROM GreenAcresEMS.dbo.LeaseAgreements),
+           (SELECT COUNT(*) FROM GreenAcresEMS_Restore.dbo.LeaseAgreements)
+    UNION ALL
+    SELECT 'CommissionPayments',
+           (SELECT COUNT(*) FROM GreenAcresEMS.dbo.CommissionPayments),
+           (SELECT COUNT(*) FROM GreenAcresEMS_Restore.dbo.CommissionPayments)
+    UNION ALL
+    SELECT 'AuditLog',
+           (SELECT COUNT(*) FROM GreenAcresEMS.dbo.AuditLog),
+           (SELECT COUNT(*) FROM GreenAcresEMS_Restore.dbo.AuditLog);
+END;
+GO
+
+
+-- ----------------------------------------------------------------
+-- D6: The audit trail survived the restore
+-- Expected: The restored copy still carries its AuditLog history.
+--           Recovery must not quietly discard the evidence trail.
+-- ----------------------------------------------------------------
+IF DB_ID('GreenAcresEMS_Restore') IS NOT NULL
+BEGIN
+    SELECT TOP 5
+        AuditID, EventTime, TableName, OperationType, ChangedBy
+    FROM GreenAcresEMS_Restore.dbo.AuditLog
+    ORDER BY AuditID DESC;
+END;
+GO
+
+
+-- ----------------------------------------------------------------
+-- D7: Encrypted data is STILL encrypted in the restored copy
+-- Expected: Ciphertext, not readable text - and no way to decrypt
+--           it there, because the restored database has no
+--           certificate of its own. This is the whole reason D4
+--           matters.
+-- ----------------------------------------------------------------
+IF DB_ID('GreenAcresEMS_Restore') IS NOT NULL
+BEGIN
+    SELECT TOP 3
+        ClientID,
+        FullName,
+        NRIC_Encrypted AS CiphertextAfterRestore
+    FROM GreenAcresEMS_Restore.dbo.Clients;
+END;
+GO
+
+
+-- ----------------------------------------------------------------
+-- D8: No corrupt pages anywhere
+-- Expected: ZERO rows. Any row here means SQL Server has met a
+--           damaged page and the backup chain is about to be
+--           needed for real.
+-- ----------------------------------------------------------------
+SELECT * FROM msdb.dbo.suspect_pages;
+GO
+
+
+-- ----------------------------------------------------------------
+-- D9: Integrity check of the live database
+-- Expected: "CHECKDB found 0 allocation errors and 0 consistency
+--           errors in database 'GreenAcresEMS'."
+-- ----------------------------------------------------------------
+DBCC CHECKDB ('GreenAcresEMS') WITH NO_INFOMSGS, ALL_ERRORMSGS;
+GO
+
+
+-- ----------------------------------------------------------------
+-- D10: How much data would we lose right now? (RPO check)
+-- Expected: MinutesSinceLastLogBackup should be small. It measures
+--           the real recovery point objective: everything since
+--           that moment would be lost if the disk failed now.
+-- ----------------------------------------------------------------
+SELECT
+    MAX(CASE WHEN type = 'D' THEN backup_finish_date END) AS LastFullBackup,
+    MAX(CASE WHEN type = 'I' THEN backup_finish_date END) AS LastDiffBackup,
+    MAX(CASE WHEN type = 'L' THEN backup_finish_date END) AS LastLogBackup,
+    DATEDIFF(MINUTE, MAX(CASE WHEN type = 'L' THEN backup_finish_date END), GETDATE())
+        AS MinutesSinceLastLogBackup
+FROM msdb.dbo.backupset
+WHERE database_name = 'GreenAcresEMS';
+GO
+
+
+PRINT 'Backup and recovery test cases completed.';
+GO
+
+
+
+/* ================================================================
+   SECTION E: LOGIN AUDITING (UserLoginLog + LOGON TRIGGER)
+
+   Goal: Prove that dbo.UserLoginLog is real, populated audit
+   evidence rather than an empty table, and that it is protected
+   from the roles it is meant to watch.
+   ================================================================ */
+
+USE GreenAcresEMS;
+GO
+
+-- ----------------------------------------------------------------
+-- E1: The logon trigger exists and is enabled
+-- Expected: One row, is_disabled = 0. If the row is missing, the
+--           build script could not impersonate 'sa' and said so.
+-- ----------------------------------------------------------------
+SELECT
+    name        AS TriggerName,
+    is_disabled AS IsDisabled,
+    create_date
+FROM sys.server_triggers
+WHERE name = 'trg_ServerLogon_AuditLogin';
+GO
+
+
+-- ----------------------------------------------------------------
+-- E2: A successful application login is recorded
+-- Expected: 'Login Successful' from the procedure, then a matching
+--           UserLoginLog row with IsSuccessful = 1.
+--           (B7 already cleared irfan.hakim's forced-reset flag; if
+--           this returns 'Password Change Required', run B7 first.)
+-- ----------------------------------------------------------------
+EXEC dbo.usp_VerifySystemUserPassword
+    @LoginName     = 'irfan.hakim',
+    @PlainPassword = 'IrfanSecure@2026';
+GO
+
+SELECT TOP 5 LogID, LoginName, LoginTime, IsSuccessful, HostName, FailureReason
+FROM dbo.UserLoginLog
+ORDER BY LogID DESC;
+GO
+
+
+-- ----------------------------------------------------------------
+-- E3: A FAILED application login is recorded, with a reason
+-- Expected: 'Invalid Login' from the procedure, and a new
+--           UserLoginLog row with IsSuccessful = 0 and
+--           FailureReason = 'Incorrect password'.
+-- ----------------------------------------------------------------
+EXEC dbo.usp_VerifySystemUserPassword
+    @LoginName     = 'irfan.hakim',
+    @PlainPassword = 'DefinitelyTheWrongPassword';
+GO
+
+SELECT TOP 5 LogID, LoginName, LoginTime, IsSuccessful, FailureReason
+FROM dbo.UserLoginLog
+ORDER BY LogID DESC;
+GO
+
+
+-- ----------------------------------------------------------------
+-- E4: An attempt on an unknown account is logged, but the error
+--     message gives nothing away
+-- Expected: The caller sees the same generic 'Invalid Login', while
+--           UserLoginLog records 'Unknown or inactive account'.
+--           This stops an attacker using the error text to work out
+--           which user names exist.
+-- ----------------------------------------------------------------
+EXEC dbo.usp_VerifySystemUserPassword
+    @LoginName     = 'no.such.person',
+    @PlainPassword = 'Whatever@2026';
+GO
+
+SELECT TOP 3 LogID, LoginName, IsSuccessful, FailureReason
+FROM dbo.UserLoginLog
+WHERE LoginName = 'no.such.person'
+ORDER BY LogID DESC;
+GO
+
+
+-- ----------------------------------------------------------------
+-- E5: Brute-force detection
+-- Expected: After the failures above, 'no.such.person' and/or
+--           'irfan.hakim' appear once the threshold is reached.
+--           Threshold lowered to 1 here so the test is repeatable.
+-- ----------------------------------------------------------------
+EXEC dbo.usp_ReportSuspiciousLogins
+    @WindowMinutes = 60,
+    @FailThreshold = 1;
+GO
+
+
+-- ----------------------------------------------------------------
+-- E6: Session length is tracked (login -> logout)
+-- Expected: The chosen row shows a LogoutTime and a SessionMinutes
+--           value instead of an open-ended session.
+-- ----------------------------------------------------------------
+DECLARE @OpenLogID INT =
+    (SELECT MAX(LogID) FROM dbo.UserLoginLog
+     WHERE IsSuccessful = 1 AND LogoutTime IS NULL);
+
+IF @OpenLogID IS NULL
+    PRINT 'SKIP: no open successful session to close - run E2 first.';
+ELSE
+BEGIN
+    EXEC dbo.usp_RecordLogout @LogID = @OpenLogID;
+
+    SELECT LogID, LoginName, LoginTime, LogoutTime, SessionMinutes
+    FROM dbo.vw_LoginHistory
+    WHERE LogID = @OpenLogID;
+END;
+GO
+
+
+-- ----------------------------------------------------------------
+-- E7: Login history joins cleanly to staff and department
+-- Expected: FullName and DepartmentName are filled in for rows
+--           belonging to known EMS staff.
+-- ----------------------------------------------------------------
+SELECT TOP 10
+    LogID, LoginName, FullName, DepartmentName, UserRole,
+    LoginTime, IsSuccessful
+FROM dbo.vw_LoginHistory
+ORDER BY LogID DESC;
+GO
+
+
+-- ----------------------------------------------------------------
+-- E8: Login history is NOT readable by the watched roles
+-- Expected: 'PASS' for both. Otherwise a developer could profile
+--           who works when, and confirm which accounts exist.
+-- ----------------------------------------------------------------
+EXECUTE AS USER = 'hakim.zulkifli';    -- role_Analyst
+    BEGIN TRY
+        SELECT TOP 1 * FROM dbo.UserLoginLog;
+        PRINT 'FAIL: Analyst read the login log.';
+    END TRY
+    BEGIN CATCH
+        PRINT 'PASS: Login log denied -> ' + ERROR_MESSAGE();
+    END CATCH;
+REVERT;
+GO
+
+EXECUTE AS USER = 'jason.lim';         -- role_ReadOnly
+    BEGIN TRY
+        SELECT TOP 1 * FROM dbo.vw_LoginHistory;
+        PRINT 'FAIL: ReadOnly read the login history view.';
+    END TRY
+    BEGIN CATCH
+        PRINT 'PASS: Login history denied -> ' + ERROR_MESSAGE();
+    END CATCH;
+REVERT;
+GO
+
+
+-- ----------------------------------------------------------------
+-- E9: Forced password reset on the onboarding password
+-- Expected: 'Password Change Required' - the password is CORRECT
+--           but the account is still on the shared onboarding
+--           secret, so the login is not completed until it is
+--           replaced. Then 'Login Successful' after the change.
+-- ----------------------------------------------------------------
+SELECT TOP 5 LoginName, PasswordMustChange, PasswordLastUpdated
+FROM dbo.SystemUsers
+ORDER BY SystemUserID;
+GO
+
+DECLARE @TestLogin NVARCHAR(100) =
+    (SELECT MIN(LoginName) FROM dbo.SystemUsers WHERE PasswordMustChange = 1);
+
+IF @TestLogin IS NULL
+    PRINT 'SKIP: every account has already changed its onboarding password.';
+ELSE
+BEGIN
+    PRINT 'Testing forced reset for: ' + @TestLogin;
+    EXEC dbo.usp_VerifySystemUserPassword
+        @LoginName     = @TestLogin,
+        @PlainPassword = 'TempPassword@2026';
+
+    EXEC dbo.usp_UpdateSystemUserPassword
+        @LoginName        = @TestLogin,
+        @NewPlainPassword = 'ChangedByTestE9@2026';
+
+    EXEC dbo.usp_VerifySystemUserPassword
+        @LoginName     = @TestLogin,
+        @PlainPassword = 'ChangedByTestE9@2026';
+END;
+GO
+
+
+-- ----------------------------------------------------------------
+-- E10: Failed SERVER logins come from the audit file, not the
+--      logon trigger
+-- Expected: LGIF rows for any wrong-password connection attempt.
+--      A logon trigger cannot see these - the connection is
+--      rejected before it fires - which is why the Server Audit
+--      Specification carries FAILED_LOGIN_GROUP.
+--
+--      To generate evidence: open a second SSMS connection, choose
+--      SQL Server Authentication, enter a real EMS login with a
+--      wrong password once, then run this query.
+--
+--      Requires CONTROL SERVER (sysadmin) to read the audit file.
+-- ----------------------------------------------------------------
+SELECT TOP 20
+    event_time,
+    action_id,
+    succeeded,
+    server_principal_name,
+    client_ip,
+    application_name
+FROM sys.fn_get_audit_file('C:\SQLAudit\GA_EMS_ServerAudit*.sqlaudit', DEFAULT, DEFAULT)
+WHERE action_id IN ('LGIF', 'LGIS')
+ORDER BY event_time DESC;
+GO
+
+
+PRINT 'Login auditing test cases completed.';
 GO
 
 

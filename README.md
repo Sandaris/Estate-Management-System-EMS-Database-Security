@@ -14,13 +14,13 @@ The original developer script (Appendix I of the brief) is five bare tables with
 
 | File | Lines | What it is |
 |---|---|---|
-| **`DDL.sql`** | 3,486 | **Structure only.** Every `CREATE`/`ALTER`, plus the whole permission model. Loads no data. |
-| **`DML.sql`** | 3,067 | **Data, operations and tests.** Seed load, encryption/hashing, backups, restore rehearsal, and all 77 test cases. |
-| `Compiled_code.sql` | 4,428 | Single-file reference version. Same database as `DDL.sql` + `DML.sql` combined. |
-| `test_cases.sql` | 1,819 | The test suite on its own — the separate deliverable the brief asks for. Identical to `DML.sql` Section 7. |
+| **`DDL.sql`** | 3,489 | **Structure only.** Every `CREATE`/`ALTER`, plus the whole permission model. Loads no data. |
+| **`DML.sql`** | 3,061 | **Data, operations and tests.** Seed load, encryption/hashing, backups, restore rehearsal, and all 77 test cases. |
 | `DBS Assignment Question.pdf` | — | The assignment brief. |
 
-Two ways to build the same database. Use the split pair for marking and reading; `Compiled_code.sql` is there if you'd rather run one file.
+Two files, run in order. Between them they build the complete database and then prove it works.
+
+An earlier single-file version (`Compiled_code.sql`) and a standalone copy of the tests (`test_cases.sql`) were removed once everything they contained had been carried into these two files. They remain in the Git history if ever needed.
 
 ---
 
@@ -44,7 +44,7 @@ Two ways to build the same database. Use the split pair for marking and reading;
 
 `DDL.sql` **drops and recreates** the `GreenAcresEMS` database at the top. Running it again wipes the data, so `DML.sql` must be re-run after it. Both files are otherwise safely re-runnable — object creation is guarded, and leftover logins from a previous run are cleaned up.
 
-To run the single-file version instead, execute `Compiled_code.sql` top to bottom, then `test_cases.sql`.
+`DML.sql` is written to run top to bottom in one go, but it is split into seven clearly headed sections if you would rather step through it — load the data, then protect it, then back it up, then test.
 
 ### If you get locked out
 
@@ -58,22 +58,24 @@ DISABLE TRIGGER trg_ServerLogon_AuditLogin ON ALL SERVER;
 
 ## Where each requirement is implemented
 
-The brief lists twelve techniques. All twelve are implemented; both file layouts are given.
+The brief lists twelve techniques. All twelve are implemented. Line numbers are the definition of each object; the data or operation that goes with it is in `DML.sql`.
 
-| # | Requirement | What was built | `DDL.sql` | `Compiled_code.sql` |
+| # | Requirement | What was built | Defined in | Data / operation in |
 |---|---|---|---|---|
-| 1 | View | 9 views — 7 business + 2 login-audit | §6, §14 | 1156, 3769 |
-| 2 | Stored Procedure | 20 procedures | §7, §10 | 1326, 2550 |
-| 3 | Role | 6 roles | §3 | 921 |
-| 4 | User | 12 named logins + users + memberships | §4 | 930 |
-| 5 | Hash | SHA2_512 over a 32-byte `CRYPT_GEN_RANDOM` salt, per account | §9 | 2451 |
-| 6 | Encryption | Master key → certificate → AES-256 symmetric key; 5 encrypted columns; controlled decryption procedures | §9, §10 | 2310, 2759 |
-| 7 | Masking | 19 masked columns across 9 tables | §8 | 1933 |
-| 8 | Backups | Full, differential, log, copy-only + **certificate and master-key export** + restore rehearsal + point-in-time procedure | — (`DML.sql` §5) | 3004 |
-| 9 | Server auditing | `GA_EMS_ServerAudit` + spec, 6 action groups | §13 | 3571 |
-| 10 | Database auditing | `GA_EMS_DatabaseAuditSpec`, 5 groups + 16 object-level actions | §13 | 3610 |
-| 11 | Trigger | 13 — 8 audit, 4 operational, 1 server `LOGON` | §15, §14 | 3863, 4306, 3697 |
-| 12 | New/edited tables | 5 originals extended + 9 new tables | §2 | 45 |
+| 1 | View | 9 views — 7 business + 2 login-audit | `DDL.sql` 669, 2844 | — |
+| 2 | Stored Procedure | 20 procedures | `DDL.sql` 836, 1973, 2207 | — |
+| 3 | Role | 6 roles | `DDL.sql` 431 | — |
+| 4 | User | 12 named logins + users + memberships | `DDL.sql` 441 | — |
+| 5 | Hash | SHA2_512 over a 32-byte `CRYPT_GEN_RANDOM` salt, per account | `DDL.sql` 1894 | `DML.sql` §3 (729) |
+| 6 | Encryption | Master key → certificate → AES-256 symmetric key; 5 encrypted columns; controlled decryption procedures | `DDL.sql` 1813, 2207 | `DML.sql` §2 (641) |
+| 7 | Masking | 19 masked columns across 9 tables | `DDL.sql` 1433 | — |
+| 8 | Backups | Full, differential, log, copy-only + **certificate and master-key export** + restore rehearsal + point-in-time procedure | — | `DML.sql` §5 (823) |
+| 9 | Server auditing | `GA_EMS_ServerAudit` + spec, 6 action groups | `DDL.sql` 2659 | `DML.sql` §6 (1177) |
+| 10 | Database auditing | `GA_EMS_DatabaseAuditSpec`, 5 groups + 16 object-level actions | `DDL.sql` 2698 | `DML.sql` §6 (1177) |
+| 11 | Trigger | 13 — 8 audit (2940), 4 operational (3367), 1 server `LOGON` (2775) | `DDL.sql` | `DML.sql` §1/§4 (trigger toggling around the load) |
+| 12 | New/edited tables | 5 originals extended + 9 new tables | `DDL.sql` 102 | `DML.sql` §1 (60) |
+
+Permissions are not a numbered requirement but carry a large share of Section 2's marks: `DDL.sql` line 591 onwards for the database-, table-, view- and procedure-level `GRANT`/`DENY`.
 
 ---
 
@@ -103,7 +105,7 @@ The brief lists twelve techniques. All twelve are implemented; both file layouts
 
 ## Roles and users
 
-Six roles, twelve named accounts, two per role. Every person gets their **own** login with a **unique** password, so `ORIGINAL_LOGIN()` in the audit triggers can always name a single human. Passwords are in `DDL.sql` §4.
+Six roles, twelve named accounts, two per role. Every person gets their **own** login with a **unique** password, so `ORIGINAL_LOGIN()` in the audit triggers can always name a single human. Passwords are in `DDL.sql` from line 441.
 
 | Role | Members | Scope |
 |---|---|---|
@@ -141,7 +143,7 @@ Each control is one layer, never the whole answer:
 
 ## Test suite — 77 cases
 
-In `DML.sql` Section 7, and in `test_cases.sql`. Each case states its expected result in a comment above it; permission tests print `PASS`/`FAIL`.
+All in `DML.sql` Section 7 (line 1256 onwards). Each case states its expected result in a comment above it; permission tests print `PASS`/`FAIL`.
 
 | Block | Cases | Covers |
 |---|---|---|
@@ -177,7 +179,7 @@ Stated deliberately — each one is a defensible design decision, not an oversig
 The brief asks for more than SQL. Not in this repository yet:
 
 - **`Report_<group number>.pdf`** — introduction and data dictionary, Authorization Matrix, Data Classification Matrix, Database Security Audit Matrix, summary, references
-- **`DBS_TestCases_<group number>.docx`** — the test cases with **documented outcomes**. `test_cases.sql` states expected results but records no actual ones; run it and capture what you get.
+- **`DBS_TestCases_<group number>.docx`** — the test cases with **documented outcomes**. `DML.sql` Section 7 states the expected result for every case but records no actual ones; run it and capture what you actually get.
 - **Demo video** — 5 to 15 minutes, presented as though to a real client. Captions optional; English subtitles required if narrated.
 
 For the report, three things are easier to generate than to write by hand: the permission matrix (`DML.sql` Section 6), the masked-column list (test B1), and the object inventory (end of Section 6).

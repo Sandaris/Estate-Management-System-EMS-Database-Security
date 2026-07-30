@@ -16,11 +16,9 @@
    ------------------------------------------------------------------------
    ONE THING WORTH UNDERSTANDING BEFORE YOU RUN IT
 
-   In the original single-file script the 12 table triggers were created
-   at the very END, so the seed data was loaded BEFORE any trigger
-   existed. Splitting the build changes that: DDL.sql now creates every
-   trigger up front, so a plain bulk load would fire them all and corrupt
-   the seed data three different ways:
+   DDL.sql creates all 12 table triggers before this file runs a single
+   INSERT. A plain bulk load would therefore fire every one of them and
+   corrupt the seed data three different ways:
 
      * trg_Transactions_AutoCommission would auto-generate a commission
        row for each of the 50 seeded transactions, and then the explicit
@@ -34,13 +32,14 @@
 
    Section 1 therefore disables the triggers on the eight affected tables,
    loads and protects the data, and Section 4 switches them back on and
-   proves it. This is normal practice for seeding a database, and it
-   leaves exactly the same end state as the original script.
+   proves it - all 12 enabled, AuditLog empty, no duplicated commission
+   row. Disabling triggers around a bulk seed load is normal practice; the
+   verification queries are what make it safe to do.
 
-   A side benefit of the new ordering: the FULL backup in Section 5 is now
-   taken AFTER the triggers and audit objects exist, so the .bak finally
-   contains the finished database. In the original file the backup ran
-   before the triggers were created and captured an incomplete schema.
+   Note also that the FULL backup in Section 5 is taken AFTER every
+   trigger and audit object exists, so the .bak captures the finished
+   database rather than a half-built one. Backing up before the schema is
+   complete is a common and expensive mistake.
    ------------------------------------------------------------------------
 
    CONTENTS
@@ -1256,10 +1255,10 @@ GO
    ========================================================================
    SECTION 7: TEST SUITE
 
-   The complete contents of test_cases.sql - 77 test cases in six blocks.
-   test_cases.sql is kept as its own file as well, because the assignment
-   asks for the test cases as a separate deliverable
-   (DBS_TestCases_<group number>.docx); the two are identical.
+   77 test cases in six blocks. This is the material for the
+   DBS_TestCases_<group number>.docx deliverable: every case states the
+   result it expects, so run the block, capture what actually comes back,
+   and record the two side by side.
 
      SECTION A  - Auditing & operational triggers      (A1-A10)
      SECTION B  - Data protection                      (B1-B15)
@@ -1283,7 +1282,7 @@ GO
    Goal: Prove the audit triggers (log every INSERT/UPDATE/DELETE)
    and the operational triggers (auto-update statuses, auto-create
    commission/notification rows) work correctly.
-   Run AFTER 08_triggers.sql.
+   Run AFTER Sections 1-4 above, so the triggers are back on.
    ================================================================ */
 
 -- ----------------------------------------------------------------
@@ -2199,18 +2198,13 @@ GO
 
 
 -- ============================================================
--- auditing_testcases.sql
+-- AUDIT EVIDENCE TESTS (TEST 1-12)
 -- Green Acres Realty Sdn Bhd - EMS Database Security
 -- CT069-3-3 Database Security Assignment
 --
 -- Purpose:
 --   Screenshot-friendly test cases for Documentation Section 4.
---
--- Run order:
---   1. Main database script
---   2. 08_auditing.sql
---   3. 09_audit_triggers.sql
---   4. This file
+--   Run DDL.sql, then Sections 1-6 of this file, before these tests.
 --
 -- Run this file using a sysadmin/DBA account because the tests inspect
 -- SQL Server Audit files and temporarily create/drop a test principal.

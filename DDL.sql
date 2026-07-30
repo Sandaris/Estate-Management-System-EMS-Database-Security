@@ -11,8 +11,8 @@
    Its companion, DML.sql, holds the data and the operations: the seed
    INSERTs, the encryption and hashing UPDATEs, the backup and restore
    steps, and the full test suite. Between them the two files build
-   exactly the same database as the original Compiled_code.sql, which is
-   kept unchanged as the single-file reference version.
+   the complete GreenAcresEMS database: DDL.sql defines every object,
+   DML.sql fills and exercises it.
 
    RUN ORDER - THIS MATTERS
        1. DDL.sql  (this file)  - builds the empty, secured structure
@@ -2432,7 +2432,8 @@ GO
 USE GreenAcresEMS;
 GO
 
--- 08_auditing.sql
+-- ------------------------------------------------------------------------
+-- PART 12: AUDIT TABLES, RETENTION AND AUDIT PERMISSIONS
 -- Green Acres Realty Sdn Bhd - EMS Database Security
 -- CT069-3-3 Database Security Assignment
 -- Purpose:
@@ -2903,18 +2904,20 @@ GO
 PRINT 'Login auditing wired up: logon trigger + UserLoginLog + reporting views.';
 GO
 
-PRINT 'Auditing setup completed. Next: run the trigger script and auditing_testcases.sql.';
+PRINT 'Auditing setup completed. Triggers are created next, then run DML.sql.';
 GO
 
--- 09_audit_triggers.sql
+-- ------------------------------------------------------------------------
+-- PART 15: TRIGGERS - 8 AUDIT, 4 OPERATIONAL
 -- Green Acres Realty Sdn Bhd - EMS Database Security
 -- Purpose:
 --   Create one set-based history trigger for each important table.
 --   Every changed row produces one AuditLog row containing the
 --   original login, time, application, host and before/after JSON.
--- Run after:
---   1. Compiled SQL file.sql
---   2. 08_auditing.sql
+--
+--   These are the LAST objects this file creates. DML.sql switches them
+--   off for its bulk seed load and back on afterwards - see the note at
+--   the top of that file for why.
 -- Security note:
 --   The SystemUsers trigger lists its columns EXPLICITLY (never i.* / d.*)
 --   so that no credential column can ever be copied into the audit log -
@@ -2927,7 +2930,7 @@ USE GreenAcresEMS;
 GO
 
 IF OBJECT_ID('dbo.AuditLog', 'U') IS NULL
-    THROW 50010, 'dbo.AuditLog is missing. Run 08_auditing.sql first.', 1;
+    THROW 50010, 'dbo.AuditLog is missing. Run this file from the top.', 1;
 GO
 
 

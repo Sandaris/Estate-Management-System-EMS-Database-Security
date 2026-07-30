@@ -14,8 +14,8 @@ The original developer script (Appendix I of the brief) is five bare tables with
 
 | File | Lines | What it is |
 |---|---|---|
-| **`DDL.sql`** | 3,489 | **Structure only.** Every `CREATE`/`ALTER`, plus the whole permission model. Loads no data. |
-| **`DML.sql`** | 3,061 | **Data, operations and tests.** Seed load, encryption/hashing, backups, restore rehearsal, and all 77 test cases. |
+| **`DDL.sql`** | 3,107 | **Structure only.** Every `CREATE`/`ALTER`, plus the whole permission model. Loads no data. |
+| **`DML.sql`** | 2,622 | **Data, operations and tests.** Seed load, encryption/hashing, backups, restore rehearsal, and all 77 test cases. |
 | `DBS Assignment Question.pdf` | — | The assignment brief. |
 
 Two files, run in order. Between them they build the complete database and then prove it works.
@@ -62,20 +62,20 @@ The brief lists twelve techniques. All twelve are implemented. Line numbers are 
 
 | # | Requirement | What was built | Defined in | Data / operation in |
 |---|---|---|---|---|
-| 1 | View | 9 views — 7 business + 2 login-audit | `DDL.sql` 669, 2844 | — |
-| 2 | Stored Procedure | 20 procedures | `DDL.sql` 836, 1973, 2207 | — |
-| 3 | Role | 6 roles | `DDL.sql` 431 | — |
-| 4 | User | 12 named logins + users + memberships | `DDL.sql` 441 | — |
-| 5 | Hash | SHA2_512 over a 32-byte `CRYPT_GEN_RANDOM` salt, per account | `DDL.sql` 1894 | `DML.sql` §3 (729) |
-| 6 | Encryption | Master key → certificate → AES-256 symmetric key; 5 encrypted columns; controlled decryption procedures | `DDL.sql` 1813, 2207 | `DML.sql` §2 (641) |
-| 7 | Masking | 19 masked columns across 9 tables | `DDL.sql` 1433 | — |
-| 8 | Backups | Full, differential, log, copy-only + **certificate and master-key export** + restore rehearsal + point-in-time procedure | — | `DML.sql` §5 (823) |
-| 9 | Server auditing | `GA_EMS_ServerAudit` + spec, 6 action groups | `DDL.sql` 2659 | `DML.sql` §6 (1177) |
-| 10 | Database auditing | `GA_EMS_DatabaseAuditSpec`, 5 groups + 16 object-level actions | `DDL.sql` 2698 | `DML.sql` §6 (1177) |
-| 11 | Trigger | 13 — 8 audit (2940), 4 operational (3367), 1 server `LOGON` (2775) | `DDL.sql` | `DML.sql` §1/§4 (trigger toggling around the load) |
-| 12 | New/edited tables | 5 originals extended + 9 new tables | `DDL.sql` 102 | `DML.sql` §1 (60) |
+| 1 | View | 9 views — 7 business + 2 login-audit | `DDL.sql` 562, 2489 | — |
+| 2 | Stored Procedure | 20 procedures | `DDL.sql` 729, 1777, 1969 | — |
+| 3 | Role | 6 roles | `DDL.sql` 346 | — |
+| 4 | User | 12 named logins + users + memberships | `DDL.sql` 356 | — |
+| 5 | Hash | SHA2_512 over a 32-byte `CRYPT_GEN_RANDOM` salt, per account | `DDL.sql` 1708 | `DML.sql` §3 (661) |
+| 6 | Encryption | Master key → certificate → AES-256 symmetric key; 5 encrypted columns; controlled decryption procedures | `DDL.sql` 1633, 1969 | `DML.sql` §2 (586) |
+| 7 | Masking | 19 masked columns across 9 tables | `DDL.sql` 1294 | — |
+| 8 | Backups | Full, differential, log, copy-only + **certificate and master-key export** + restore rehearsal + point-in-time procedure | — | `DML.sql` §5 (743) |
+| 9 | Server auditing | `GA_EMS_ServerAudit` + spec, 6 action groups | `DDL.sql` 2341 | `DML.sql` §6 (1039) |
+| 10 | Database auditing | `GA_EMS_DatabaseAuditSpec`, 5 groups + 16 object-level actions | `DDL.sql` 2380 | `DML.sql` §6 (1039) |
+| 11 | Trigger | 13 — 8 audit (2566), 4 operational (2989), 1 server `LOGON` (2433) | `DDL.sql` | `DML.sql` §1/§4 (trigger toggling around the load) |
+| 12 | New/edited tables | 5 originals extended + 9 new tables | `DDL.sql` 52 | `DML.sql` §1 (25) |
 
-Permissions are not a numbered requirement but carry a large share of Section 2's marks: `DDL.sql` line 591 onwards for the database-, table-, view- and procedure-level `GRANT`/`DENY`.
+Permissions are not a numbered requirement but carry a large share of Section 2's marks: `DDL.sql` line 495 onwards for the database-, table-, view- and procedure-level `GRANT`/`DENY`.
 
 ---
 
@@ -105,7 +105,7 @@ Permissions are not a numbered requirement but carry a large share of Section 2'
 
 ## Roles and users
 
-Six roles, twelve named accounts, two per role. Every person gets their **own** login with a **unique** password, so `ORIGINAL_LOGIN()` in the audit triggers can always name a single human. Passwords are in `DDL.sql` from line 441.
+Six roles, twelve named accounts, two per role. Every person gets their **own** login with a **unique** password, so `ORIGINAL_LOGIN()` in the audit triggers can always name a single human. Passwords are in `DDL.sql` from line 356.
 
 | Role | Members | Scope |
 |---|---|---|
@@ -143,7 +143,7 @@ Each control is one layer, never the whole answer:
 
 ## Test suite — 77 cases
 
-All in `DML.sql` Section 7 (line 1256 onwards). Each case states its expected result in a comment above it; permission tests print `PASS`/`FAIL`.
+All in `DML.sql` Section 7 (line 1116 onwards). Each case states its expected result in a comment above it; permission tests print `PASS`/`FAIL`.
 
 | Block | Cases | Covers |
 |---|---|---|

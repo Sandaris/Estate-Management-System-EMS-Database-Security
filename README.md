@@ -25,12 +25,14 @@ The same build is provided in **two layouts**. Pick one — they contain identic
 
 | File | Lines | What it is |
 |---|---|---|
-| `Compiled_code.sql` | 4,219 | The whole build in one script — Part A structure, Part B data and operations. |
+| `Compiled_code.sql` | 4,160 | The whole build in one script, in dependency order — 19 numbered parts. |
 | `test_cases.sql` | 1,523 | The 77 test cases on their own. Same content as `DML.sql` Section 7. |
 
 `DBS Assignment Question.pdf` is the assignment brief.
 
-Verified equivalent: `Compiled_code.sql` + `test_cases.sql` and `DDL.sql` + `DML.sql` contain exactly the same 4,280 executable lines. **If you edit one layout, mirror the change in the other** — nothing keeps them in step automatically.
+Both layouts contain the same SQL, but the single-file version is **ordered differently on purpose**: because it creates the triggers near the end, the seed data loads before any trigger exists, so it needs none of the disable/enable steps that `DML.sql` Section 1 requires. It also applies masking *after* encryption, and takes the backups last. That accounts for the small line-count difference.
+
+**If you edit one layout, mirror the change in the other** — nothing keeps them in step automatically.
 
 ---
 
@@ -57,7 +59,7 @@ Split layout:
 Single-file layout:
 
 ```
-1.  Compiled_code.sql   -- Part A structure, then Part B data and operations
+1.  Compiled_code.sql   -- the whole build, 19 parts, run top to bottom
 2.  test_cases.sql      -- the 77 test cases
 ```
 

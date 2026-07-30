@@ -3833,26 +3833,33 @@ GO
 OPEN MASTER KEY DECRYPTION BY PASSWORD = 'EMS_MasterKey_StrongPassword_2026!';
 GO
 
--- Build this run's timestamped export filenames, then use them for both
--- BACKUP statements below - the DECLAREs and their use must stay in the same
--- batch, since local variables do not survive a GO.
-DECLARE @KeyStamp NVARCHAR(20)  = FORMAT(GETDATE(), 'yyyyMMdd_HHmmss');
-DECLARE @CerFile  NVARCHAR(300) = N'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate_' + @KeyStamp + N'.cer';
-DECLARE @PvkFile  NVARCHAR(300) = N'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate_' + @KeyStamp + N'.pvk';
-DECLARE @KeyFile  NVARCHAR(300) = N'C:\EMS_Backups\Keys\EMS_MasterKey_' + @KeyStamp + N'.key';
+-- Build this run's timestamped export filenames. BACKUP CERTIFICATE and
+-- BACKUP MASTER KEY's TO FILE / FILE clauses require a literal path, not a
+-- variable (Msg 102/319 if you try), so the filenames are woven into
+-- dynamic SQL text below instead of used directly. That's safe without the
+-- quote-escaping @Password needs elsewhere in this script, because
+-- FORMAT(..., 'yyyyMMdd_HHmmss') can only ever produce digits and
+-- underscores - there is no way for it to contain a quote to break out with.
+DECLARE @KeyStamp   NVARCHAR(20)  = FORMAT(GETDATE(), 'yyyyMMdd_HHmmss');
+DECLARE @CerFile    NVARCHAR(300) = N'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate_' + @KeyStamp + N'.cer';
+DECLARE @PvkFile    NVARCHAR(300) = N'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate_' + @KeyStamp + N'.pvk';
+DECLARE @KeyFile    NVARCHAR(300) = N'C:\EMS_Backups\Keys\EMS_MasterKey_' + @KeyStamp + N'.key';
+DECLARE @BackupSql  NVARCHAR(MAX);
 
 -- 1 + 2. Export the certificate together with its private key.
-BACKUP CERTIFICATE EMS_DataProtectionCertificate
-    TO FILE = @CerFile
+SET @BackupSql = N'BACKUP CERTIFICATE EMS_DataProtectionCertificate
+    TO FILE = N''' + @CerFile + N'''
     WITH PRIVATE KEY (
-        FILE = @PvkFile,
-        ENCRYPTION BY PASSWORD = 'CertPrivateKey_Export_2026!'
-    );
+        FILE = N''' + @PvkFile + N''',
+        ENCRYPTION BY PASSWORD = ''CertPrivateKey_Export_2026!''
+    );';
+EXEC sys.sp_executesql @BackupSql;
 
 -- 3. Export the Database Master Key itself.
-BACKUP MASTER KEY
-    TO FILE = @KeyFile
-    ENCRYPTION BY PASSWORD = 'MasterKey_Export_2026!';
+SET @BackupSql = N'BACKUP MASTER KEY
+    TO FILE = N''' + @KeyFile + N'''
+    ENCRYPTION BY PASSWORD = ''MasterKey_Export_2026!'';';
+EXEC sys.sp_executesql @BackupSql;
 
 PRINT 'Certificate, private key and database master key exported with timestamp ' + @KeyStamp + ' to C:\EMS_Backups\Keys.';
 GO

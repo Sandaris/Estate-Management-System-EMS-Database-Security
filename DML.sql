@@ -1,55 +1,20 @@
 /* ========================================================================
-   DML.sql
-   Green Acres Realty Sdn Bhd - Estate Management System (EMS)
+   DML.sql - Green Acres Realty Sdn Bhd, Estate Management System (EMS)
    CT069-3-3 Database Security Assignment
 
-   WHAT THIS FILE IS
-   The Data Manipulation half of the build, plus the complete test suite.
-   Everything in here works on DATA rather than structure: the seed
-   INSERTs, the UPDATEs that encrypt and hash the sensitive columns, the
-   backup and restore operations, and all 77 test cases.
+   Data, operations and tests: seed load, encryption and hashing, backups,
+   restore rehearsal, and all 77 test cases.
 
-   RUN DDL.sql FIRST. Every table, view, procedure, trigger, key and
-   permission this file relies on is created there. Run this against an
-   empty instance and it will fail on the very first INSERT.
+   RUN DDL.sql FIRST - every object used here is created there.
+   Connect as sysadmin: the encryption step reads through Dynamic Data
+   Masking, so a login without UNMASK would encrypt the masked value.
 
-   ------------------------------------------------------------------------
-   ONE THING WORTH UNDERSTANDING BEFORE YOU RUN IT
-
-   DDL.sql creates all 12 table triggers before this file runs a single
-   INSERT. A plain bulk load would therefore fire every one of them and
-   corrupt the seed data three different ways:
-
-     * trg_Transactions_AutoCommission would auto-generate a commission
-       row for each of the 50 seeded transactions, and then the explicit
-       INSERT INTO CommissionPayments would add 50 more - double
-       commissions on every transaction;
-     * trg_Transactions_UpdatePropertyStatus would overwrite the Status
-       values the Properties seed data deliberately sets;
-     * the 8 audit triggers would write roughly 500 rows into AuditLog
-       before any real user action, burying the genuine audit evidence
-       that the Section A and TEST 1-12 cases are meant to demonstrate.
-
-   Section 1 therefore disables the triggers on the eight affected tables,
-   loads and protects the data, and Section 4 switches them back on and
-   proves it - all 12 enabled, AuditLog empty, no duplicated commission
-   row. Disabling triggers around a bulk seed load is normal practice; the
-   verification queries are what make it safe to do.
-
-   Note also that the FULL backup in Section 5 is taken AFTER every
-   trigger and audit object exists, so the .bak captures the finished
-   database rather than a half-built one. Backing up before the schema is
-   complete is a common and expensive mistake.
-   ------------------------------------------------------------------------
-
-   CONTENTS
-     1. Bulk seed load - 467 rows across 10 tables (triggers disabled)
-     2. Data protection load - encrypting the sensitive columns
-     3. Credential load - salts and SHA2_512 password hashes
-     4. Re-enabling the triggers and proving the load was clean
-     5. Backup and recovery operations - keys, backups, restore rehearsal
-     6. Build verification queries
-     7. TEST SUITE - Sections A, B, C, TEST 1-12, D and E (77 tests)
+   Sections 1-3 run with the table triggers disabled, because DDL.sql
+   creates them before this file loads any data - left on, the
+   auto-commission trigger would double every commission row, the
+   property-status trigger would overwrite the seeded Status values, and
+   the audit triggers would bury the real evidence under ~500 rows.
+   Section 4 switches them back on and proves the load was clean.
    ======================================================================== */
 
 USE GreenAcresEMS;
@@ -58,13 +23,9 @@ GO
 
 /* ========================================================================
    SECTION 1: BULK SEED LOAD
-
    Triggers are switched off for the duration of the load and the data
-   protection steps (Sections 1 to 3), then switched back on in Section 4.
-   See the note in the file header for exactly what would break otherwise.
-
-   DISABLE TRIGGER ALL is used rather than naming each trigger, so this
-   stays correct if the team adds another trigger to one of these tables.
+   protection steps (Sections 1 to 3), then switched back on in Section 4. See
+   the note in the file header for exactly what would break otherwise.
    ======================================================================== */
 ALTER TABLE dbo.Properties DISABLE TRIGGER ALL;
 ALTER TABLE dbo.Clients DISABLE TRIGGER ALL;
@@ -86,10 +47,7 @@ WHERE tr.parent_class = 1
 ORDER BY TableName, TriggerName;
 GO
 
--- INSERTING VALUES
--- residential, commercial, industrial and land properties.
--- Data includes multiple Malaysian states and operational
--- property statuses for EMS system testing and reporting.
+-- INSERTING VALUES residential, commercial, industrial and land properties.
 
 INSERT INTO Properties
 (PropertyName, Address, City, State, PostalCode, PropertyType, Bedrooms, Bathrooms, SizeSqft, Price, Status)
@@ -145,8 +103,8 @@ VALUES
 ('Mont Kiara Executive Suites', 'Unit E-22-05, Jalan Kiara Executive Residences', 'Kuala Lumpur', 'Kuala Lumpur', '50480', 'Residential', 4, 3, 2500, 2100000, 'Reserved'),
 ('Iskandar Puteri Smart Offices', 'Suite 25-01, Medini Smart Business Tower', 'Iskandar Puteri', 'Johor', '79250', 'Commercial', NULL, 6, 11000, 8300000, 'Available');
 
--- Data includes individual and corporate clients for EMS
--- testing, encryption, masking and reporting.
+-- Data includes individual and corporate clients for EMS testing, encryption,
+-- masking and reporting.
 
 INSERT INTO Clients
 (FullName, NRIC, ContactNumber, Email, Address, ClientType)
@@ -202,8 +160,8 @@ VALUES
 ('Janice Foo', '970909105555', '0128989898', 'janice.foo@gmail.com', 'Unit C-14-07, Bangsar, Kuala Lumpur', 'Individual'),
 ('Vimal Raj', '920202145555', '0173434343', 'vimal.raj@gmail.com', 'No. 18, Jalan Ipoh, Kuala Lumpur', 'Individual');
 
--- including contact details, license numbers and commission
--- rates for EMS operational, reporting and security testing.
+-- including contact details, license numbers and commission rates for EMS
+-- operational, reporting and security testing.
 
 INSERT INTO Agents
 (FullName, ContactNumber, Email, LicenseNumber, CommissionRate)
@@ -260,7 +218,6 @@ VALUES
 ('Farzana Malik', '0162345615', 'farzana.malik@ems.com.my', 'REN45870', 2.90);
 
 -- records linked to different properties, clients and agents.
--- Data avoids simple sequential matching to better reflect
 
 INSERT INTO Transactions
 (PropertyID, ClientID, AgentID, TransactionType, Amount, RentStartDate, RentEndDate, PaymentStatus, PaymentMethod)
@@ -316,10 +273,8 @@ VALUES
 (49, 42, 10, 'Sale', 2100000.00, NULL, NULL, 'Pending', 'Bank Transfer'),
 (50, 49, 2, 'Sale', 8300000.00, NULL, NULL, 'Completed', 'Cheque');
 
--- Added 50 realistic maintenance request records covering
--- plumbing, electrical, structural and facility maintenance.
--- Includes request priorities, costs and maintenance statuses
--- for EMS operational and maintenance workflow testing.
+-- Added 50 realistic maintenance request records covering plumbing, electrical,
+-- structural and facility maintenance.
 
 INSERT INTO MaintenanceRequests
 (PropertyID, RequestedByClientID, RequestDetails, Priority, RequestDate, Status, EstimatedCost, ActualCost, CompletedDate)
@@ -375,8 +330,8 @@ VALUES
 (49, 42, 'Executive suite smart lock malfunction.', 'High', '2026-03-08', 'In Progress', 2600.00, NULL, NULL),
 (50, 49, 'Commercial office carpet water damage repair.', 'Medium', '2026-03-06', 'Completed', 1800.00, 1850.00, '2026-03-12');
   
--- representing operational, administrative and technical
--- divisions used for EMS user and role management.
+-- representing operational, administrative and technical divisions used for EMS
+-- user and role management.
 
 INSERT INTO Departments
 (DepartmentName, Description)
@@ -433,8 +388,6 @@ VALUES
 ('Compliance Monitoring', 'Tracks compliance adherence and reporting activities.');
 
 -- IT, operational and administrative personnel.
--- Data includes department assignments, login credentials,
--- SHA-256 password hashing and randomized password salts.
 
 
 INSERT INTO SystemUsers
@@ -491,11 +444,8 @@ VALUES
 (31, 'Ruben Pillai', 'ruben.pillai', 'ruben.pillai@ems.com.my', HASHBYTES('SHA2_256', CONCAT('Ruben@123', 'E4#xK8')), 'E4#xK8', 'ClientPortalDev'),
 (32, 'Farzana Malik', 'farzana.malik', 'farzana.malik@ems.com.my', HASHBYTES('SHA2_256', CONCAT('Farzana@123', 'O1@mH5')), 'O1@mH5', 'PropMgmtDev');
 
--- 10. LeaseAgreements
--- Added realistic Malaysian lease agreement records linked
--- only to rental transactions from the Transactions table.
--- Data includes lease periods, monthly rent, security deposits
--- and document paths for rental agreement tracking.
+-- 10. LeaseAgreements - Added realistic Malaysian lease agreement records
+-- linked only to rental transactions from the Transactions table.
 
 INSERT INTO LeaseAgreements
 (TransactionID, PropertyID, ClientID, LeaseStartDate, LeaseEndDate, MonthlyRent, SecurityDeposit, LeaseStatus, AgreementDocPath, SignedDate)
@@ -518,10 +468,7 @@ VALUES
 (45, 45, 47, '2026-06-20', '2028-06-20', 8300.00, 16600.00, 'Active', 'docs/leases/LA-TR045.pdf', '2026-06-15'),
 (48, 48, 50, '2026-01-25', '2027-01-25', 2700.00, 5400.00, 'Active', 'docs/leases/LA-TR048.pdf', '2026-01-21');
 
--- 11. CommissionPayments
--- linked to existing transactions and agents.
--- Data includes commission rates, calculated commission
--- amounts, payment statuses and payment tracking details.
+-- 11. CommissionPayments - linked to existing transactions and agents.
 
 INSERT INTO CommissionPayments
 (TransactionID, AgentID, CommissionRate, CommissionAmount, PaymentStatus, PaymentDate, Remarks)
@@ -577,10 +524,8 @@ VALUES
 (49, 10, 2.50, 52500.00, 'Unpaid', NULL, 'Commission pending transaction completion.'),
 (50, 2, 2.40, 199200.00, 'Paid', '2026-06-10', 'Commission settled for completed sale.');
 
--- 12. MaintenanceStaff
--- covering in-house and contractor-based maintenance teams.
--- Data includes staff specialisations, employment types and
--- operational workforce tracking for EMS maintenance services.
+-- 12. MaintenanceStaff - covering in-house and contractor-based maintenance
+-- teams.
 
 INSERT INTO MaintenanceStaff
 (FullName, ContactNumber, Specialisation, IsContractor, JoinedDate)
@@ -639,21 +584,10 @@ GO
 
 /* ========================================================================
    SECTION 2: DATA PROTECTION LOAD - ENCRYPTION
-
-   The ciphertext columns themselves were created by DDL.sql; this is
-   where they are populated from the plain values Section 1 just loaded.
+   The ciphertext columns themselves were created by DDL.sql; this is where they
+   are populated from the plain values Section 1 just loaded.
    ======================================================================== */
--- ------------------------------------------------------------------------
 -- Populate the ciphertext columns from the existing plain values.
---
--- IMPORTANT ORDERING NOTE: this runs AFTER Dynamic Data Masking has been
--- applied to the same table. That is safe only because this script is
--- executed by a sysadmin / the database owner, who is implicitly exempt
--- from masking. If a user WITHOUT the UNMASK permission ran this block,
--- EncryptByKey would faithfully encrypt the MASKED strings ("XXXXXX1234")
--- and the real data would be lost. Anyone re-running this must therefore
--- connect as sysadmin, db_owner, or a login holding UNMASK.
--- ------------------------------------------------------------------------
 OPEN SYMMETRIC KEY EMS_ClientDataSymmetricKey
 DECRYPTION BY CERTIFICATE EMS_DataProtectionCertificate;
 GO
@@ -686,9 +620,7 @@ GO
 CLOSE SYMMETRIC KEY EMS_ClientDataSymmetricKey;
 GO
 
--- ------------------------------------------------------------------------
 -- The encrypted lease-document path.
--- ------------------------------------------------------------------------
 OPEN SYMMETRIC KEY EMS_ClientDataSymmetricKey
 DECRYPTION BY CERTIFICATE EMS_DataProtectionCertificate;
 GO
@@ -727,12 +659,8 @@ GO
 
 /* ========================================================================
    SECTION 3: CREDENTIAL LOAD - SALTS AND PASSWORD HASHES
-
-   A fresh 32-byte cryptographic salt per account, then a SHA2_512 hash of
-   the onboarding password combined with that salt. The plain password is
-   never stored. PasswordMustChange (created in DDL.sql) is left at its
-   default of 1, so usp_VerifySystemUserPassword refuses to complete a
-   login until the account owner replaces the shared onboarding secret.
+   A fresh 32-byte cryptographic salt per account, then a SHA2_512 hash of the
+   onboarding password combined with that salt.
    ======================================================================== */
 UPDATE dbo.SystemUsers
 SET PasswordSaltSecure = CRYPT_GEN_RANDOM(32)
@@ -740,13 +668,9 @@ WHERE PasswordSaltSecure IS NULL;
 GO
 
 
-
--- Every account is seeded with the SAME temporary password and is expected
--- to change it at first login (the PasswordMustChange column, added by
--- DDL.sql, is what enforces this). A shared
--- onboarding secret that must be replaced immediately is standard practice;
--- what would NOT be acceptable is leaving it in place, which is why the
--- verification procedure refuses to complete a login until it is changed.
+-- Every account is seeded with the SAME temporary password and is expected to
+-- change it at first login (the PasswordMustChange column, added by DDL.sql, is
+-- what enforces this).
 UPDATE dbo.SystemUsers
 SET
     PasswordHashSecure = HASHBYTES(
@@ -758,9 +682,7 @@ SET
 WHERE PasswordHashSecure IS NULL;
 GO
 
--- Proof: no readable password anywhere, and every account has its own
--- salt. Expected: DistinctSalts equals TotalAccounts, SaltBytes = 32,
--- HashBytes = 64.
+-- Proof: no readable password anywhere, and every account has its own salt.
 SELECT
     COUNT(*)                            AS TotalAccounts,
     COUNT(DISTINCT PasswordSaltSecure)  AS DistinctSalts,
@@ -774,11 +696,10 @@ GO
 
 /* ========================================================================
    SECTION 4: RE-ENABLE THE TRIGGERS
-
-   From this point on the database behaves exactly as it will in
-   production: every INSERT, UPDATE and DELETE on a sensitive table is
-   captured in dbo.AuditLog, and the operational triggers maintain
-   property status, commissions and notifications automatically.
+   From this point on the database behaves exactly as it will in production:
+   every INSERT, UPDATE and DELETE on a sensitive table is captured in
+   dbo.AuditLog, and the operational triggers maintain property status,
+   commissions and notifications automatically.
    ======================================================================== */
 ALTER TABLE dbo.Properties ENABLE TRIGGER ALL;
 ALTER TABLE dbo.Clients ENABLE TRIGGER ALL;
@@ -789,8 +710,7 @@ ALTER TABLE dbo.SystemUsers ENABLE TRIGGER ALL;
 ALTER TABLE dbo.LeaseAgreements ENABLE TRIGGER ALL;
 ALTER TABLE dbo.CommissionPayments ENABLE TRIGGER ALL;
 GO
--- Expected: all 12 triggers 'Enabled'. A trigger left disabled here would
--- mean silent gaps in the audit trail, so this check matters.
+-- Expected: all 12 triggers 'Enabled'.
 SELECT
     tr.name                   AS TriggerName,
     OBJECT_NAME(tr.parent_id) AS TableName,
@@ -800,13 +720,13 @@ WHERE tr.parent_class = 1
 ORDER BY TableName, TriggerName;
 GO
 
--- The seed load must NOT have produced audit rows - that is the whole
--- reason the triggers were disabled. Expected: 0.
+-- The seed load must NOT have produced audit rows - that is the whole reason
+-- the triggers were disabled.
 SELECT COUNT(*) AS AuditRowsFromSeedLoad_ShouldBeZero FROM dbo.AuditLog;
 GO
 
--- Commission data must come only from the seed file, not from the
--- auto-commission trigger firing during the load.
+-- Commission data must come only from the seed file, not from the auto-
+-- commission trigger firing during the load.
 -- Expected: TransactionsWithCommission = 50, DuplicateCommissions = 0.
 SELECT
     (SELECT COUNT(DISTINCT TransactionID) FROM dbo.CommissionPayments) AS TransactionsWithCommission,
@@ -821,48 +741,29 @@ GO
 
 /* ========================================================================
    SECTION 5: BACKUP AND RECOVERY OPERATIONS
-
-   Backups act on data, not on structure, so they belong in this file -
-   and they must run AFTER the load, or the .bak would capture an empty
-   database.
-
-   Runs in the master context. The recovery model was already set to FULL
-   by DDL.sql, which is what makes the log backup and the point-in-time
-   recovery below possible.
+   Backups act on data, not on structure, so they belong in this file - and they
+   must run AFTER the load, or the .bak would capture an empty database.
    ======================================================================== */
 
 USE master;
 GO
 
--- Create the backup directory on disk (requires xp_cmdshell OR
--- do this manually in Windows Explorer). Optional helper:
+-- Create the backup directory on disk (requires xp_cmdshell OR do this manually
+-- in Windows Explorer).
 EXEC master.dbo.xp_create_subdir 'C:\EMS_Backups';
 GO
 
--- Separate folder for key material. In production this would live on
--- different media with different access control from the .bak files - if an
--- attacker steals one folder they must not automatically get the other.
+-- Separate folder for key material.
 EXEC master.dbo.xp_create_subdir 'C:\EMS_Backups\Keys';
 GO
 
 
 /* ========================================================================
    REQUIREMENT 8 (part 1): BACKING UP THE KEY MATERIAL
-
-   THIS IS THE STEP THAT MOST BACKUP PLANS FORGET.
-
-   Clients.NRIC_Encrypted and the other ciphertext columns can only be read
-   with the certificate EMS_DataProtectionCertificate, which is itself
-   protected by the Database Master Key. Restore GreenAcresEMS_FULL.bak onto
-   a DIFFERENT instance and the certificate does not exist there - the
-   restored ciphertext is permanently unreadable. A backup you cannot
-   decrypt is not a backup.
-
-   So we export three things, and they must be kept SAFE and SEPARATE from
-   the database backups:
-     1. the certificate (public part)     -> .cer
-     2. its private key                   -> .pvk, protected by a password
-     3. the database master key            -> .key, protected by a password
+   Restore the .bak on another instance without the certificate and every
+   encrypted column is permanently unreadable, so the certificate, its private
+   key and the database master key are exported too - and must be stored
+   separately from the .bak files.
 
    RECOVERY ON A NEW INSTANCE - the order matters:
      RESTORE DATABASE GreenAcresEMS FROM DISK = '...FULL.bak' WITH ...;
@@ -887,7 +788,6 @@ OPEN MASTER KEY DECRYPTION BY PASSWORD = 'EMS_MasterKey_StrongPassword_2026!';
 GO
 
 -- 1 + 2. Export the certificate together with its private key.
---        Without the private key the .cer file cannot decrypt anything.
 BACKUP CERTIFICATE EMS_DataProtectionCertificate
     TO FILE = 'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate.cer'
     WITH PRIVATE KEY (
@@ -931,8 +831,8 @@ GO
 
 /* ========================================================================
    REQUIREMENT 8 (part 2 continued): DIFFERENTIAL BACKUP
-   Captures only what changed since the last FULL backup, so the daily
-   window stays short. Restoring needs FULL + the latest DIFFERENTIAL.
+   Captures only what changed since the last FULL backup, so the daily window
+   stays short.
    ======================================================================== */
 BACKUP DATABASE GreenAcresEMS
 TO DISK = 'C:\EMS_Backups\GreenAcresEMS_DIFF.bak'
@@ -947,7 +847,6 @@ WITH
 GO
 
 
-
 BACKUP LOG GreenAcresEMS
 TO DISK = 'C:\EMS_Backups\GreenAcresEMS_LOG.trn'
 WITH
@@ -958,7 +857,6 @@ WITH
     CHECKSUM,
     STATS = 10;
 GO
-
 
 
 RESTORE VERIFYONLY
@@ -993,25 +891,13 @@ GO
 
 /* ========================================================================
    REQUIREMENT 8 (part 3): PROVING THE RESTORE ACTUALLY WORKS
-
-   An untested backup is only a hope. This section performs a real recovery
-   so the client can see the Availability side of CIA being met.
-
-   SAFETY: we restore into a SEPARATE copy of the database called
-   GreenAcresEMS_Restore, using WITH MOVE to place its files in the same
-   data folder under new names. The live GreenAcresEMS is never touched, so
-   this can be demonstrated on camera without risk.
-
-   The chain must be applied in this exact order:
-       FULL  (NORECOVERY)  ->  DIFFERENTIAL (NORECOVERY)  ->  LOG (RECOVERY)
-   NORECOVERY leaves the database "restoring" so more backups can be added.
-   Only the final step brings it online.
+   An untested backup is only a hope.
    ======================================================================== */
 USE master;
 GO
 
--- Discover where this instance keeps its data files, so the MOVE below works
--- on any machine instead of a hard-coded C:\Program Files\... path.
+-- Discover where this instance keeps its data files, so the MOVE below works on
+-- any machine instead of a hard-coded C:\Program Files\...
 DECLARE @DataPath NVARCHAR(500) = CAST(SERVERPROPERTY('InstanceDefaultDataPath') AS NVARCHAR(500));
 DECLARE @LogPath  NVARCHAR(500) = CAST(SERVERPROPERTY('InstanceDefaultLogPath')  AS NVARCHAR(500));
 PRINT 'Data path : ' + ISNULL(@DataPath, '(unknown)');
@@ -1028,16 +914,8 @@ BEGIN
 END;
 GO
 
--- ------------------------------------------------------------------------
--- Step 1 of 3: restore the FULL backup, leaving the copy offline
---              (NORECOVERY) so the differential can follow.
---
--- The two MOVE clauses are built dynamically from the default data/log
--- paths, so this runs unchanged on the lecturer's machine. The logical file
--- names 'GreenAcresEMS' and 'GreenAcresEMS_log' are the SQL Server defaults
--- for a database created with a bare CREATE DATABASE, as ours was - confirm
--- them with RESTORE FILELISTONLY if the restore complains.
--- ------------------------------------------------------------------------
+-- Step 1 of 3: restore the FULL backup, leaving the copy offline (NORECOVERY)
+-- so the differential can follow.
 DECLARE @DataPath NVARCHAR(500) = CAST(SERVERPROPERTY('InstanceDefaultDataPath') AS NVARCHAR(500));
 DECLARE @LogPath  NVARCHAR(500) = CAST(SERVERPROPERTY('InstanceDefaultLogPath')  AS NVARCHAR(500));
 DECLARE @sql      NVARCHAR(MAX);
@@ -1056,19 +934,13 @@ PRINT @sql;
 EXEC sys.sp_executesql @sql;
 GO
 
--- ------------------------------------------------------------------------
 -- Step 2 of 3: apply the DIFFERENTIAL, still NORECOVERY.
--- ------------------------------------------------------------------------
 RESTORE DATABASE GreenAcresEMS_Restore
 FROM DISK = 'C:\EMS_Backups\GreenAcresEMS_DIFF.bak'
 WITH NORECOVERY, STATS = 10;
 GO
 
--- ------------------------------------------------------------------------
 -- Step 3 of 3: apply the LOG and bring the database online.
---
--- WITH RECOVERY = "no more backups are coming, open the database".
--- ------------------------------------------------------------------------
 RESTORE LOG GreenAcresEMS_Restore
 FROM DISK = 'C:\EMS_Backups\GreenAcresEMS_LOG.trn'
 WITH RECOVERY, STATS = 10;
@@ -1077,10 +949,7 @@ GO
 PRINT 'Restore rehearsal complete: GreenAcresEMS_Restore is online.';
 GO
 
--- ------------------------------------------------------------------------
--- Post-restore verification: does the recovered copy actually hold the
--- data? Compare row counts side by side. Every pair must match.
--- ------------------------------------------------------------------------
+-- Post-restore verification: does the recovered copy actually hold the data?
 SELECT 'Properties'  AS TableName,
        (SELECT COUNT(*) FROM GreenAcresEMS.dbo.Properties)          AS LiveRows,
        (SELECT COUNT(*) FROM GreenAcresEMS_Restore.dbo.Properties)  AS RestoredRows
@@ -1103,8 +972,6 @@ SELECT 'CommissionPayments',
 GO
 
 -- Confirm the encrypted data survived the restore as ciphertext.
--- (It cannot be DECRYPTED in the copy until the certificate is available
--- there - which is exactly why the key backup section above exists.)
 SELECT TOP 3
     ClientID,
     FullName,
@@ -1115,9 +982,10 @@ GO
 
 /* ========================================================================
    POINT-IN-TIME RECOVERY (the "someone deleted the wrong rows" scenario)
-
-   FULL recovery model + log backups let us roll forward to a specific
-   second, stopping just BEFORE a mistake. Run these one block at a time.
+   FULL recovery model plus log backups let us roll forward to a specific
+   second, stopping just before a mistake; documented rather than executed
+   because STOPAT needs a real timestamp and step 3 takes the live database
+   offline. Run one block at a time.
 
    1. Note the time now - this is our "known good" point:
           SELECT GETDATE() AS KnownGoodTime;
@@ -1138,15 +1006,11 @@ GO
 
    5. Verify the rows are back to their pre-accident values, then copy the
       corrected rows across, or rename the databases to swap them.
-
-   Written out rather than executed because STOPAT needs a real timestamp
-   from the demo, and because step 3 deliberately takes the live database
-   offline - not something a build script should ever do on its own.
    ======================================================================== */
 
--- COPY_ONLY backup: an ad-hoc backup (before a risky deployment, say) that
--- does NOT reset the differential base, so the scheduled backup chain above
--- keeps working normally.
+-- COPY_ONLY backup: an ad-hoc backup (before a risky deployment, say) that does
+-- NOT reset the differential base, so the scheduled backup chain above keeps
+-- working normally.
 BACKUP DATABASE GreenAcresEMS
 TO DISK = 'C:\EMS_Backups\GreenAcresEMS_COPYONLY.bak'
 WITH COPY_ONLY, INIT, CHECKSUM, COMPRESSION,
@@ -1154,13 +1018,11 @@ WITH COPY_ONLY, INIT, CHECKSUM, COMPRESSION,
      DESCRIPTION = 'Taken before a change; does not break the differential chain';
 GO
 
--- Corruption watch: this table should always be EMPTY. Any row here means
--- SQL Server met a damaged page and the backups need to be relied on.
+-- Corruption watch: this table should always be EMPTY.
 SELECT * FROM msdb.dbo.suspect_pages;
 GO
 
--- Confirm the recovery model is still FULL. In SIMPLE recovery, log backups
--- are impossible and point-in-time recovery cannot be offered at all.
+-- Confirm the recovery model is still FULL.
 SELECT
     name             AS DatabaseName,
     recovery_model_desc,
@@ -1175,9 +1037,8 @@ GO
 
 /* ========================================================================
    SECTION 6: BUILD VERIFICATION QUERIES
-
-   Screenshot-friendly confirmation that the objects DDL.sql created are
-   present and switched on.
+   Screenshot-friendly confirmation that the objects DDL.sql created are present
+   and switched on.
    ======================================================================== */
 
 USE GreenAcresEMS;
@@ -1252,46 +1113,24 @@ GO
 
 
 /* ========================================================================
-   ========================================================================
    SECTION 7: TEST SUITE
-
-   77 test cases in six blocks. This is the material for the
-   DBS_TestCases_<group number>.docx deliverable: every case states the
-   result it expects, so run the block, capture what actually comes back,
-   and record the two side by side.
-
-     SECTION A  - Auditing & operational triggers      (A1-A10)
-     SECTION B  - Data protection                      (B1-B15)
-     SECTION C  - Access control                       (C1-C20)
-     TEST 1-12  - Audit evidence for the documentation
-     SECTION D  - Backup, recovery & availability      (D1-D10)
-     SECTION E  - Login auditing                       (E1-E10)
-
-   Read the comment above each test for the expected result, then compare
-   it against what the query actually returns.
-   ========================================================================
+   77 test cases in six blocks.
    ======================================================================== */
 
 USE GreenAcresEMS;
 GO
 
 
-/* ================================================================
+/* ========================================================================
    SECTION A: AUDITING & OPERATIONAL TRIGGERS
-   Member: Sarvein
-   Goal: Prove the audit triggers (log every INSERT/UPDATE/DELETE)
-   and the operational triggers (auto-update statuses, auto-create
-   commission/notification rows) work correctly.
-   Run AFTER Sections 1-4 above, so the triggers are back on.
-   ================================================================ */
+   Member: Sarvein Goal: Prove the audit triggers (log every
+   INSERT/UPDATE/DELETE) and the operational triggers (auto-update statuses,
+   auto-create commission/notification rows) work correctly.
+   ======================================================================== */
 
--- ----------------------------------------------------------------
--- A1: INSERT audit test
--- What we do   : Insert a new Client.
--- Expected     : A new row appears in AuditLog for this Client,
---                with OperationType = 'INSERT', NewValues filled in,
---                and OldValues empty (NULL) because nothing existed before.
--- ----------------------------------------------------------------
+-- A1: INSERT audit test - insert a new Client.
+-- Expected: a new AuditLog row with OperationType 'INSERT', NewValues filled
+-- in and OldValues NULL.
 INSERT INTO dbo.Clients (FullName, NRIC, ContactNumber, Email, Address, ClientType)
 VALUES ('Test Trigger Client', '999999999999', '0100000000', 'test.trigger@example.com', 'Test Address', 'Individual');
 
@@ -1303,12 +1142,9 @@ ORDER BY AuditID DESC;
 GO
 
 
--- ----------------------------------------------------------------
--- A2: UPDATE audit test
--- What we do   : Update the Email of the Client we just created.
--- Expected     : A new AuditLog row with OperationType = 'UPDATE',
---                OldValues shows the previous email, NewValues shows the new one.
--- ----------------------------------------------------------------
+-- A2: UPDATE audit test - update the Email of the Client from A1.
+-- Expected: an AuditLog row with OperationType 'UPDATE', OldValues showing the
+-- previous email and NewValues the new one.
 DECLARE @TestClientID INT = (SELECT TOP 1 ClientID FROM dbo.Clients WHERE FullName = 'Test Trigger Client');
 
 UPDATE dbo.Clients
@@ -1321,12 +1157,9 @@ ORDER BY AuditID DESC;
 GO
 
 
--- ----------------------------------------------------------------
--- A3: DELETE audit test
--- What we do   : Delete the test Client.
--- Expected     : A new AuditLog row with OperationType = 'DELETE',
---                OldValues filled in, NewValues empty (NULL).
--- ----------------------------------------------------------------
+-- A3: DELETE audit test - delete the test Client.
+-- Expected: an AuditLog row with OperationType 'DELETE', OldValues filled in
+-- and NewValues NULL.
 DECLARE @TestClientID INT = (SELECT TOP 1 ClientID FROM dbo.Clients WHERE FullName = 'Test Trigger Client');
 
 DELETE FROM dbo.Clients WHERE ClientID = @TestClientID;
@@ -1337,13 +1170,9 @@ ORDER BY AuditID DESC;
 GO
 
 
--- ----------------------------------------------------------------
--- A4: Multi-row audit test
--- What we do   : Run one UPDATE statement that touches MANY Agent rows at once.
--- Expected     : One AuditLog row is created PER row changed, not just
---                one row for the whole statement. AgentsUpdated should
---                equal AuditRowsAdded, and Result should say PASS.
--- ----------------------------------------------------------------
+-- A4: Multi-row audit test - one UPDATE touching many Agent rows.
+-- Expected: one AuditLog row PER row changed, not one for the statement -
+-- AgentsUpdated should equal AuditRowsAdded and Result should say PASS.
 DECLARE @BeforeCount INT = (SELECT COUNT(*) FROM dbo.AuditLog WHERE TableName = 'Agents' AND OperationType = 'UPDATE');
 DECLARE @AffectedRows INT = (SELECT COUNT(*) FROM dbo.Agents WHERE CommissionRate < 2.00);
 
@@ -1357,11 +1186,8 @@ SELECT @AffectedRows AS AgentsUpdated, (@AfterCount - @BeforeCount) AS AuditRows
 GO
 
 
--- ----------------------------------------------------------------
--- A5: Operational trigger - Sale marks Property as Sold
--- What we do   : Insert a new Sale transaction for an Available property.
--- Expected     : That Property's Status automatically becomes 'Sold'.
--- ----------------------------------------------------------------
+-- A5: Operational trigger - a 'Sale' transaction marks the Property Sold.
+-- Expected: that Property's Status automatically becomes 'Sold'.
 DECLARE @PropID INT = (SELECT TOP 1 PropertyID FROM dbo.Properties WHERE Status = 'Available');
 DECLARE @ClientID INT = (SELECT TOP 1 ClientID FROM dbo.Clients);
 DECLARE @AgentID INT = (SELECT TOP 1 AgentID FROM dbo.Agents);
@@ -1374,13 +1200,9 @@ SELECT PropertyID, Status FROM dbo.Properties WHERE PropertyID = @PropID;
 GO
 
 
--- ----------------------------------------------------------------
--- A6: Operational trigger - Transaction auto-creates Commission
--- What we do   : Look at the last Transaction inserted (from A5).
--- Expected     : A matching CommissionPayments row exists, and its
---                CommissionAmount = Transaction Amount x Agent's rate / 100.
---                Result column should say PASS.
--- ----------------------------------------------------------------
+-- A6: Operational trigger - a Transaction auto-creates its Commission row.
+-- Expected: a matching CommissionPayments row exists with CommissionAmount =
+-- Amount x the agent's rate / 100, and Result says PASS.
 DECLARE @LastTransID INT = (SELECT MAX(TransactionID) FROM dbo.Transactions);
 
 SELECT t.TransactionID, t.Amount, a.CommissionRate, cp.CommissionAmount,
@@ -1394,12 +1216,9 @@ WHERE t.TransactionID = @LastTransID;
 GO
 
 
--- ----------------------------------------------------------------
--- A7: Operational trigger - Terminating a Lease frees up the Property
--- What we do   : Change an Active lease's status to 'Terminated'.
--- Expected     : The linked Property goes back to 'Available' (unless
---                it was already Sold), and exactly 1 new Notification is created.
--- ----------------------------------------------------------------
+-- A7: Operational trigger - terminating a Lease frees up the Property.
+-- Expected: the linked Property returns to 'Available' unless it was already
+-- Sold, and exactly 1 new Notification is created.
 DECLARE @LeaseID INT = (SELECT TOP 1 LeaseID FROM dbo.LeaseAgreements WHERE LeaseStatus = 'Active');
 DECLARE @LeasePropID INT = (SELECT PropertyID FROM dbo.LeaseAgreements WHERE LeaseID = @LeaseID);
 DECLARE @NotifCountBefore INT = (SELECT COUNT(*) FROM dbo.Notifications WHERE RelatedTable = 'LeaseAgreements' AND RelatedRecordID = @LeaseID);
@@ -1409,17 +1228,14 @@ UPDATE dbo.LeaseAgreements SET LeaseStatus = 'Terminated' WHERE LeaseID = @Lease
 SELECT
     (SELECT Status FROM dbo.Properties WHERE PropertyID = @LeasePropID) AS PropertyStatusAfter,
     (SELECT COUNT(*) FROM dbo.Notifications WHERE RelatedTable = 'LeaseAgreements' AND RelatedRecordID = @LeaseID) - @NotifCountBefore AS NewNotifications;
--- Expected: PropertyStatusAfter = 'Available' (unless it was 'Sold'), NewNotifications = 1
+-- Expected: PropertyStatusAfter = 'Available' (unless it was 'Sold'),
+-- NewNotifications = 1
 GO
 
 
--- ----------------------------------------------------------------
--- A8: Operational trigger - Completing a maintenance request
--- What we do   : Mark a MaintenanceRequest (that has a Client attached)
---                as 'Completed'.
--- Expected     : CompletedDate gets filled in automatically, and
---                1 new Notification is created.
--- ----------------------------------------------------------------
+-- A8: Operational trigger - completing a MaintenanceRequest stamps the date.
+-- Expected: CompletedDate is filled in automatically and 1 new Notification is
+-- created.
 DECLARE @ReqID INT = (
     SELECT TOP 1 RequestID FROM dbo.MaintenanceRequests
     WHERE Status <> 'Completed' AND RequestedByClientID IS NOT NULL
@@ -1440,14 +1256,9 @@ ELSE
 GO
 
 
--- ----------------------------------------------------------------
--- A9: Masking/encryption does not break the audit trigger
--- What we do   : Insert another test Client (encrypted/masked columns exist).
--- Expected     : NewValues in AuditLog still captures the encrypted
---                column as a Base64 string, with no errors - this works
---                because the trigger runs WITH EXECUTE AS OWNER, so it
---                can read the data even if the current user cannot.
--- ----------------------------------------------------------------
+-- A9: Masking and encryption do not break the audit trigger.
+-- Expected: NewValues still captures the encrypted column as Base64 with no
+-- error, because the trigger runs WITH EXECUTE AS OWNER.
 INSERT INTO dbo.Clients (FullName, NRIC, ContactNumber, Email, Address, ClientType)
 VALUES ('Masking Test Client', '888888888888', '0111111111', 'masking.test@example.com', 'Masking Test Address', 'Individual');
 
@@ -1460,9 +1271,7 @@ DELETE FROM dbo.Clients WHERE FullName = 'Masking Test Client';
 GO
 
 
--- ----------------------------------------------------------------
 -- A10: Summary - everything the audit log has captured so far
--- ----------------------------------------------------------------
 SELECT TableName, OperationType, COUNT(*) AS EventCount
 FROM dbo.AuditLog
 GROUP BY TableName, OperationType
@@ -1470,19 +1279,15 @@ ORDER BY TableName, OperationType;
 GO
 
 
-
-/* ================================================================
+/* ========================================================================
    SECTION B: DATA PROTECTION (MASKING / ENCRYPTION / HASHING)
-   Member: Irfan
-   Goal: Prove that sensitive data is masked for normal users,
-   properly encrypted at rest, and passwords are stored as salted
-   hashes instead of plain text.
-   ================================================================ */
+   Member: Irfan Goal: Prove that sensitive data is masked for normal users,
+   properly encrypted at rest, and passwords are stored as salted hashes instead
+   of plain text.
+   ======================================================================== */
 
--- ----------------------------------------------------------------
 -- B1: List every masked column that was set up
 -- Expected: One row per masked column across all the listed tables.
--- ----------------------------------------------------------------
 SELECT
     OBJECT_NAME(object_id) AS TableName,
     name AS MaskedColumnName,
@@ -1503,11 +1308,9 @@ ORDER BY TableName, MaskedColumnName;
 GO
 
 
--- ----------------------------------------------------------------
 -- B2: Confirm encrypted Client columns look unreadable
--- Expected: The *_Encrypted columns show random binary bytes,
---           not the plain NRIC/ContactNumber/Email/Address values.
--- ----------------------------------------------------------------
+-- Expected: The *_Encrypted columns show random binary bytes, not the plain
+-- NRIC/ContactNumber/Email/Address values.
 SELECT TOP 10
     ClientID,
     FullName,
@@ -1523,11 +1326,9 @@ FROM dbo.Clients;
 GO
 
 
--- ----------------------------------------------------------------
 -- B3: Decrypt Client data using the symmetric key
--- Expected: Once the key is opened, the Decrypted* columns show the
---           original readable values again.
--- ----------------------------------------------------------------
+-- Expected: Once the key is opened, the Decrypted* columns show the original
+-- readable values again.
 OPEN SYMMETRIC KEY EMS_ClientDataSymmetricKey
 DECRYPTION BY CERTIFICATE EMS_DataProtectionCertificate;
 GO
@@ -1546,10 +1347,8 @@ CLOSE SYMMETRIC KEY EMS_ClientDataSymmetricKey;
 GO
 
 
--- ----------------------------------------------------------------
 -- B4: Confirm the lease document path is encrypted
 -- Expected: AgreementDocPath_Encrypted shows binary, not the plain path.
--- ----------------------------------------------------------------
 SELECT TOP 10
     LeaseID,
     TransactionID,
@@ -1559,10 +1358,8 @@ FROM dbo.LeaseAgreements;
 GO
 
 
--- ----------------------------------------------------------------
 -- B5: Decrypt the lease document path
 -- Expected: DecryptedAgreementDocPath matches the original plain path.
--- ----------------------------------------------------------------
 OPEN SYMMETRIC KEY EMS_ClientDataSymmetricKey
 DECRYPTION BY CERTIFICATE EMS_DataProtectionCertificate;
 GO
@@ -1578,11 +1375,9 @@ CLOSE SYMMETRIC KEY EMS_ClientDataSymmetricKey;
 GO
 
 
--- ----------------------------------------------------------------
 -- B6: Confirm passwords are never stored as plain text
--- Expected: PasswordSaltSecure and PasswordHashSecure show unreadable
---           binary values, never the actual password.
--- ----------------------------------------------------------------
+-- Expected: PasswordSaltSecure and PasswordHashSecure show unreadable binary
+-- values, never the actual password.
 SELECT TOP 10
     SystemUserID,
     FullName,
@@ -1596,11 +1391,8 @@ FROM dbo.SystemUsers;
 GO
 
 
--- ----------------------------------------------------------------
 -- B7: Update a password and verify login works correctly
 -- Expected: Correct password -> "Login Successful".
---           Wrong password   -> "Invalid Login".
--- ----------------------------------------------------------------
 EXEC dbo.usp_UpdateSystemUserPassword
     @LoginName = 'irfan.hakim',
     @NewPlainPassword = 'IrfanSecure@2026';
@@ -1617,10 +1409,8 @@ EXEC dbo.usp_VerifySystemUserPassword
 GO
 
 
--- ----------------------------------------------------------------
 -- B8: Final summary - which data protection features actually exist
 -- Expected: Every SecurityFeature row shows a count greater than 0.
--- ----------------------------------------------------------------
 SELECT
     'Dynamic Data Masking' AS SecurityFeature,
     COUNT(*) AS AppliedColumnCount
@@ -1676,13 +1466,10 @@ WHERE object_id = OBJECT_ID('dbo.SystemUsers')
 GO
 
 
--- ----------------------------------------------------------------
 -- B9: The old, weaker credential columns are GONE
--- Expected: 0 rows. PasswordHash (SHA2_256) and PasswordSalt
---           (plain-text salt) were dropped once the salted
---           SHA2_512 columns took over, so there is no second,
---           weaker credential store left to attack.
--- ----------------------------------------------------------------
+-- Expected: 0 rows. PasswordHash (SHA2_256) and PasswordSalt (plain-text salt)
+-- were dropped once the salted SHA2_512 columns took over, so there is no
+-- second, weaker credential store left to attack.
 SELECT name AS LegacyCredentialColumnStillPresent
 FROM sys.columns
 WHERE object_id = OBJECT_ID('dbo.SystemUsers')
@@ -1690,22 +1477,19 @@ WHERE object_id = OBJECT_ID('dbo.SystemUsers')
 GO
 
 
--- ----------------------------------------------------------------
 -- B10: Controlled decryption THROUGH the stored procedure
--- Expected: Readable NRIC / ContactNumber / Email / Address for
---           ClientID 1. The procedure is WITH EXECUTE AS OWNER, so
---           it - not the caller - opens the symmetric key. The
---           caller never touches the certificate.
--- ----------------------------------------------------------------
+-- Expected: Readable NRIC / ContactNumber / Email / Address for ClientID 1. The
+-- procedure is WITH EXECUTE AS OWNER, so it - not the caller - opens the
+-- symmetric key.
 EXEC dbo.usp_GetClientSensitiveData
     @ClientID = 1,
     @Reason   = 'Test case B10 - verifying controlled decryption path';
 GO
 
--- The access itself is audit evidence: this call must appear in
--- AuditLog as a SELECT/DECRYPT_READ event naming the real login.
--- Expected: at least one row, ChangedBy = your login, and the
---           NewValues JSON contains "DECRYPT_READ" plus the reason.
+-- The access itself is audit evidence: this call must appear in AuditLog as a
+-- SELECT/DECRYPT_READ event naming the real login.
+-- Expected: at least one row, ChangedBy = your login, and the NewValues JSON
+-- contains "DECRYPT_READ" plus the reason.
 SELECT TOP 5
     AuditID, EventTime, TableName, OperationType,
     RecordID, ChangedBy, NewValues
@@ -1716,24 +1500,15 @@ ORDER BY AuditID DESC;
 GO
 
 
--- ----------------------------------------------------------------
 -- B11: Decrypting the lease document path through its procedure
 -- Expected: The readable 'docs/leases/LA-TR002.pdf' style path.
--- ----------------------------------------------------------------
 DECLARE @AnyLeaseID INT = (SELECT MIN(LeaseID) FROM dbo.LeaseAgreements);
 EXEC dbo.usp_GetLeaseDocumentPath @LeaseID = @AnyLeaseID;
 GO
 
 
--- ----------------------------------------------------------------
 -- B12: A developer role CANNOT reach the decryption door
--- Expected: 'PASS' for both. vijay.menon (role_ClientPortalDev) is
---           explicitly DENIED execute, and he cannot open the
---           symmetric key by hand either, because CONTROL on the
---           certificate was granted to role_DBA only.
---           This is the test that proves encryption is a real
---           boundary and not just stored ciphertext.
--- ----------------------------------------------------------------
+-- Expected: 'PASS' for both.
 EXECUTE AS USER = 'vijay.menon';
     BEGIN TRY
         EXEC dbo.usp_GetClientSensitiveData @ClientID = 1;
@@ -1759,14 +1534,9 @@ REVERT;
 GO
 
 
--- ----------------------------------------------------------------
 -- B13: New data added later is encrypted too
 -- Expected: The new client starts with NULL ciphertext, and after
---           usp_EncryptClientPII the ciphertext columns are
---           populated. This proves encryption covers ongoing
---           operations, not only the rows that existed at build
---           time.
--- ----------------------------------------------------------------
+-- usp_EncryptClientPII the ciphertext columns are populated.
 EXEC dbo.usp_ManageClient
     @FullName      = 'B13 Encryption Coverage Test',
     @NRIC          = '900101101234',
@@ -1792,14 +1562,9 @@ DELETE FROM dbo.Clients WHERE ClientID = @NewClientID;
 GO
 
 
--- ----------------------------------------------------------------
 -- B14: The masking limit we documented, proved
--- Expected: MaskedRead shows a masked/random value while
---           RealTotal returns a genuine figure. This demonstrates
---           on purpose that Dynamic Data Masking does not mask
---           AGGREGATES, which is why masking sits behind
---           permissions and auditing and is never the only control.
--- ----------------------------------------------------------------
+-- Expected: MaskedRead shows a masked/random value while RealTotal returns a
+-- genuine figure.
 EXECUTE AS USER = 'jason.lim';          -- role_ReadOnly, no UNMASK
     SELECT TOP 3
         'MaskedRead' AS TestPart,
@@ -1821,13 +1586,9 @@ REVERT;
 GO
 
 
--- ----------------------------------------------------------------
 -- B15: Analyst UNMASK is explicit and column-level (SQL 2022+)
--- Expected: On SQL Server 2022 or newer, role_Analyst holds UNMASK
---           on financial columns ONLY - never on a PII column.
---           On SQL Server 2019 this returns no rows, which is the
---           documented fallback.
--- ----------------------------------------------------------------
+-- Expected: On SQL Server 2022 or newer, role_Analyst holds UNMASK on financial
+-- columns ONLY - never on a PII column.
 SELECT
     dp.permission_name,
     OBJECT_NAME(dp.major_id) AS TableName,
@@ -1843,24 +1604,14 @@ ORDER BY pr.name, TableName, ColumnName;
 GO
 
 
-
-/* ================================================================
+/* ========================================================================
    SECTION C: ACCESS CONTROL (ROLES / USERS / VIEWS / PROCEDURES)
-   Member: Rama
-   Goal: Prove that each database role only has the permissions it
+   Member: Rama Goal: Prove that each database role only has the permissions it
    should have - no more, no less (principle of least privilege).
+   ======================================================================== */
 
-   Technique used:
-     EXECUTE AS USER = '...'  -> temporarily "become" that user
-     REVERT                  -> switch back to your own login
-                                 (ALWAYS run this after each test)
-   Run AFTER access_control.sql.
-   ================================================================ */
-
--- ----------------------------------------------------------------
 -- C1: Confirm all roles exist and have members
 -- Expected: 6 roles listed (role_...), each with at least 1 member.
--- ----------------------------------------------------------------
 SELECT r.name AS RoleName, m.name AS MemberName
 FROM sys.database_role_members rm
 JOIN sys.database_principals r ON r.principal_id = rm.role_principal_id
@@ -1870,10 +1621,8 @@ ORDER BY RoleName, MemberName;
 GO
 
 
--- ----------------------------------------------------------------
 -- C2: Confirm every SystemUsers.UserRole has a matching database role
 -- Expected: RoleStatus = 'EXISTS' for every distinct UserRole value.
--- ----------------------------------------------------------------
 SELECT DISTINCT
     su.UserRole,
     'role_' + su.UserRole AS ExpectedRoleName,
@@ -1885,10 +1634,8 @@ LEFT JOIN sys.database_principals dp
 GO
 
 
--- ----------------------------------------------------------------
 -- C3: role_ReadOnly CAN read a safe view
 -- Expected: Rows returned successfully from vw_PropertyListing.
--- ----------------------------------------------------------------
 EXECUTE AS USER = 'jason.lim';          -- jason.lim is in role_ReadOnly
     SELECT TOP 5 PropertyID, PropertyName, City, Status
     FROM vw_PropertyListing;
@@ -1896,10 +1643,8 @@ REVERT;
 GO
 
 
--- ----------------------------------------------------------------
 -- C4: role_ReadOnly is BLOCKED from a sensitive base table
 -- Expected: Permission denied error (this proves least privilege works).
--- ----------------------------------------------------------------
 EXECUTE AS USER = 'jason.lim';          -- role_ReadOnly
     BEGIN TRY
         SELECT TOP 1 * FROM dbo.CommissionPayments;
@@ -1912,11 +1657,9 @@ REVERT;
 GO
 
 
--- ----------------------------------------------------------------
 -- C5: role_Analyst sees MASKED personal data (linked to Irfan's masking)
--- Expected: hakim.zulkifli (no UNMASK permission) sees masked
---           NRIC, ContactNumber and Email values, not the real ones.
--- ----------------------------------------------------------------
+-- Expected: hakim.zulkifli (no UNMASK permission) sees masked NRIC,
+-- ContactNumber and Email values, not the real ones.
 EXECUTE AS USER = 'hakim.zulkifli';    -- role_Analyst
     SELECT TOP 5 ClientID, FullName, NRIC, ContactNumber, Email
     FROM vw_ClientDirectory;
@@ -1924,10 +1667,8 @@ REVERT;
 GO
 
 
--- ----------------------------------------------------------------
 -- C6: role_Admin sees UNMASKED personal data (UNMASK permission granted)
 -- Expected: farid.rahman sees the real NRIC and Email values.
--- ----------------------------------------------------------------
 EXECUTE AS USER = 'farid.rahman';      -- role_Admin
     SELECT TOP 5 ClientID, FullName, NRIC, Email
     FROM dbo.Clients;
@@ -1935,10 +1676,8 @@ REVERT;
 GO
 
 
--- ----------------------------------------------------------------
 -- C7: role_DBA has full access, including unmasked data
 -- Expected: arun.kumar sees real values in both Clients and CommissionPayments.
--- ----------------------------------------------------------------
 EXECUTE AS USER = 'arun.kumar';        -- role_DBA
     SELECT TOP 5 ClientID, FullName, NRIC, Email FROM dbo.Clients;
     SELECT TOP 3 CommissionID, CommissionAmount FROM dbo.CommissionPayments;
@@ -1946,10 +1685,8 @@ REVERT;
 GO
 
 
--- ----------------------------------------------------------------
 -- C8: role_PropMgmtDev can insert a property THROUGH the procedure
 -- Expected: usp_ManageProperty runs successfully.
--- ----------------------------------------------------------------
 EXECUTE AS USER = 'kelvin.ong';        -- role_PropMgmtDev
     EXEC dbo.usp_ManageProperty
         @PropertyName = 'Test Location',
@@ -1967,10 +1704,9 @@ REVERT;
 GO
 
 
--- ----------------------------------------------------------------
 -- C9: role_PropMgmtDev is BLOCKED from writing directly to CommissionPayments
--- Expected: Direct INSERT is denied (they must go through approved procedures only).
--- ----------------------------------------------------------------
+-- Expected: Direct INSERT is denied (they must go through approved procedures
+-- only).
 EXECUTE AS USER = 'kelvin.ong';        -- role_PropMgmtDev
     BEGIN TRY
         INSERT INTO dbo.CommissionPayments
@@ -1985,10 +1721,8 @@ REVERT;
 GO
 
 
--- ----------------------------------------------------------------
 -- C10: role_ClientPortalDev can create a client THROUGH the procedure
 -- Expected: New client row is inserted successfully.
--- ----------------------------------------------------------------
 EXECUTE AS USER = 'vijay.menon';       -- role_ClientPortalDev
     EXEC dbo.usp_ManageClient
         @FullName      = 'Test Client',
@@ -2001,11 +1735,9 @@ REVERT;
 GO
 
 
--- ----------------------------------------------------------------
 -- C11: Stored procedure rejects bad input
--- Expected: usp_UpdatePropertyStatus raises an error for a status
---           value that isn't allowed (e.g. 'Invalid-Status').
--- ----------------------------------------------------------------
+-- Expected: usp_UpdatePropertyStatus raises an error for a status value that
+-- isn't allowed (e.g.
 BEGIN TRY
     EXEC dbo.usp_UpdatePropertyStatus
         @PropertyID = 1,
@@ -2018,10 +1750,8 @@ END CATCH;
 GO
 
 
--- ----------------------------------------------------------------
 -- C12: role_Analyst can read reporting/summary views
 -- Expected: Both views return data rows successfully.
--- ----------------------------------------------------------------
 EXECUTE AS USER = 'hakim.zulkifli';   -- role_Analyst
     SELECT * FROM vw_MonthlySalesSummary;
     SELECT TOP 5 AgentName, TotalSales, TotalTransactionValue
@@ -2031,10 +1761,8 @@ REVERT;
 GO
 
 
--- ----------------------------------------------------------------
 -- C13: role_Analyst CANNOT run a write procedure
 -- Expected: EXECUTE permission on usp_ManageProperty is denied.
--- ----------------------------------------------------------------
 EXECUTE AS USER = 'hakim.zulkifli';   -- role_Analyst
     BEGIN TRY
         EXEC dbo.usp_ManageProperty
@@ -2050,10 +1778,8 @@ REVERT;
 GO
 
 
--- ----------------------------------------------------------------
 -- C14: usp_ProvisionUser successfully adds a new user
 -- Expected: Login, database user, and role membership are all created.
--- ----------------------------------------------------------------
 EXEC dbo.usp_ProvisionUser
     @LoginName = 'test.newstaff',
     @Password  = 'Test@NewStaff#2026',
@@ -2061,19 +1787,15 @@ EXEC dbo.usp_ProvisionUser
 GO
 
 
--- ----------------------------------------------------------------
 -- C15: usp_DeprovisionUser successfully removes that user
--- Expected: test.newstaff is removed from roles, database user
---           dropped, and login dropped - nothing left behind.
--- ----------------------------------------------------------------
+-- Expected: test.newstaff is removed from roles, database user dropped, and
+-- login dropped - nothing left behind.
 EXEC dbo.usp_DeprovisionUser @LoginName = 'test.newstaff';
 GO
 
 
--- ----------------------------------------------------------------
 -- C16: usp_ProvisionUser rejects a missing/NULL password
 -- Expected: 'PASS: NULL parameter rejected -> ...' is printed.
--- ----------------------------------------------------------------
 BEGIN TRY
     EXEC dbo.usp_ProvisionUser
         @LoginName = 'test.incomplete',
@@ -2087,15 +1809,9 @@ END CATCH;
 GO
 
 
--- ----------------------------------------------------------------
 -- C17: usp_ProvisionUser resists SQL injection
--- Expected: 'PASS' - the login name is rejected by the character
---           whitelist before any dynamic SQL is built, and
---           dbo.Clients is untouched.
---           These procedures have to build dynamic SQL (CREATE
---           LOGIN cannot take a parameter), so this test proves the
---           QUOTENAME + whitelist hardening actually holds.
--- ----------------------------------------------------------------
+-- Expected: 'PASS' - the login name is rejected by the character whitelist
+-- before any dynamic SQL is built, and dbo.Clients is untouched.
 DECLARE @ClientsBefore INT = (SELECT COUNT(*) FROM dbo.Clients);
 
 BEGIN TRY
@@ -2119,11 +1835,9 @@ ELSE
 GO
 
 
--- ----------------------------------------------------------------
 -- C18: A short password is rejected
--- Expected: 'PASS' - the procedure enforces a 12-character minimum
---           before it ever reaches CREATE LOGIN.
--- ----------------------------------------------------------------
+-- Expected: 'PASS' - the procedure enforces a 12-character minimum before it
+-- ever reaches CREATE LOGIN.
 BEGIN TRY
     EXEC dbo.usp_ProvisionUser
         @LoginName = 'test.shortpw',
@@ -2137,13 +1851,9 @@ END CATCH;
 GO
 
 
--- ----------------------------------------------------------------
 -- C19: Provisioning is a DBA duty, not a business-Admin duty
 -- Expected: 'PASS' - farid.rahman (role_Admin) has no EXECUTE on
---           usp_ProvisionUser. If a business Admin could mint
---           logins, they could create an account in role_DBA and
---           escalate their own privilege.
--- ----------------------------------------------------------------
+-- usp_ProvisionUser.
 EXECUTE AS USER = 'farid.rahman';      -- role_Admin
     BEGIN TRY
         EXEC dbo.usp_ProvisionUser
@@ -2159,13 +1869,8 @@ REVERT;
 GO
 
 
--- ----------------------------------------------------------------
 -- C20: Full permission matrix dump for the report
--- Expected: One row per explicit GRANT/DENY per role. Paste this
---           result into the Authorization Matrix section of the
---           documentation - it is the authoritative version of the
---           matrix, taken straight from the engine.
--- ----------------------------------------------------------------
+-- Expected: One row per explicit GRANT/DENY per role.
 SELECT
     pr.name                             AS RoleName,
     dp.state_desc                       AS GrantOrDeny,
@@ -2195,29 +1900,16 @@ ORDER BY pr.name, SecurableName, dp.permission_name;
 GO
 
 
-
-
--- ============================================================
--- AUDIT EVIDENCE TESTS (TEST 1-12)
--- Green Acres Realty Sdn Bhd - EMS Database Security
--- CT069-3-3 Database Security Assignment
---
--- Purpose:
---   Screenshot-friendly test cases for Documentation Section 4.
---   Run DDL.sql, then Sections 1-6 of this file, before these tests.
---
--- Run this file using a sysadmin/DBA account because the tests inspect
--- SQL Server Audit files and temporarily create/drop a test principal.
--- ============================================================
+-- AUDIT EVIDENCE TESTS (TEST 1-12) Green Acres Realty Sdn Bhd - EMS Database
+-- Security CT069-3-3 Database Security Assignment Purpose: Screenshot-friendly
+-- test cases for Documentation Section 4. Run DDL.sql, then Sections 1-6 of
+-- this file, before these tests.
 
 USE GreenAcresEMS;
 GO
 
--- ============================================================
 -- TEST 1: AuditLog table exists
 -- Expected: One row showing dbo.AuditLog.
--- Screenshot: result grid.
--- ============================================================
 SELECT
     CASE
         WHEN OBJECT_ID('dbo.AuditLog', 'U') IS NOT NULL THEN 'PASS'
@@ -2232,11 +1924,8 @@ SELECT
     ) AS CreatedDate;
 GO
 
--- ============================================================
 -- TEST 2: Audit triggers exist on important tables
 -- Expected: 8 trigger rows, all enabled.
--- Screenshot: result grid.
--- ============================================================
 SELECT
     tr.name AS TriggerName,
     OBJECT_NAME(tr.parent_id) AS TableName,
@@ -2253,15 +1942,8 @@ WHERE name LIKE 'trg_%_Audit'
   AND is_disabled = 0;
 GO
 
--- ============================================================
 -- TEST 3: UPDATE client data and prove AuditLog records it
--- Expected:
---   1. Client Email changes.
---   2. AuditLog shows one UPDATE row for Clients.
--- Screenshot:
---   Take one screenshot before UPDATE and one after AuditLog SELECT.
---   The original email is restored after evidence is displayed.
--- ============================================================
+-- Expected: 1. Client Email changes.
 DECLARE @AuditClientID INT;
 DECLARE @OriginalEmail NVARCHAR(100);
 DECLARE @DemoEmail NVARCHAR(100);
@@ -2309,14 +1991,8 @@ SET Email = @OriginalEmail
 WHERE ClientID = @AuditClientID;
 GO
 
--- ============================================================
 -- TEST 4: INSERT transaction and prove trigger audit works
--- Expected:
---   1. New transaction is inserted.
---   2. AuditLog shows INSERT for Transactions.
--- Note:
---   The test runs in a transaction and rolls back all business changes.
--- ============================================================
+-- Expected: 1. New transaction is inserted.
 DECLARE @PropertyID INT =
     (SELECT TOP (1) PropertyID FROM dbo.Properties WHERE Status = 'Available' ORDER BY PropertyID);
 DECLARE @ClientID INT =
@@ -2355,13 +2031,8 @@ ORDER BY AuditID DESC;
 ROLLBACK TRANSACTION;
 GO
 
--- ============================================================
 -- TEST 5: ReadOnly user cannot read AuditLog
--- Expected:
---   PASS message with permission denied.
--- Screenshot:
---   Messages tab.
--- ============================================================
+-- Expected: PASS message with permission denied.
 IF USER_ID('jason.lim') IS NULL
 BEGIN
     SELECT
@@ -2386,13 +2057,8 @@ BEGIN
 END;
 GO
 
--- ============================================================
 -- TEST 6: SQL Server Audit is enabled
--- Expected:
---   Server audit and database audit specification both show enabled.
--- Screenshot:
---   Result grids.
--- ============================================================
+-- Expected: Server audit and database audit specification both show enabled.
 USE master;
 GO
 
@@ -2424,15 +2090,8 @@ FROM sys.database_audit_specifications
 WHERE name = 'GA_EMS_DatabaseAuditSpec';
 GO
 
--- ============================================================
 -- TEST 7: Read SQL Server Audit file
--- Expected:
---   Audit rows appear after SELECT/UPDATE/permission tests.
--- If no rows appear immediately, wait a few seconds and run again.
--- Screenshot:
---   Result grid showing event_time, action_id, succeeded,
---   database_name, schema_name, object_name, statement.
--- ============================================================
+-- Expected: Audit rows appear after SELECT/UPDATE/permission tests.
 SELECT TOP 50
     event_time,
     action_id,
@@ -2447,12 +2106,9 @@ WHERE database_name = 'GreenAcresEMS'
 ORDER BY event_time DESC;
 GO
 
--- ============================================================
 -- TEST 8: Audit specifications contain the required actions
--- Expected:
---   Result grids show login, principal, permission, role, schema,
---   sensitive-object and audit-evidence actions.
--- ============================================================
+-- Expected: Result grids show login, principal, permission, role, schema,
+-- sensitive-object and audit-evidence actions.
 USE master;
 GO
 
@@ -2482,10 +2138,8 @@ WHERE das.name = 'GA_EMS_DatabaseAuditSpec'
 ORDER BY dad.audit_action_name, ObjectName;
 GO
 
--- ============================================================
 -- TEST 9: Multi-row updates create one history row per changed row
 -- Expected: RowsAffected = AuditRowsCreated and TestResult = PASS.
--- ============================================================
 DECLARE @AuditCountBefore INT =
     (SELECT COUNT(*) FROM dbo.AuditLog
      WHERE TableName = 'Agents' AND OperationType = 'UPDATE');
@@ -2508,10 +2162,9 @@ SELECT
     END AS TestResult;
 GO
 
--- ============================================================
--- TEST 10: Generate permission, role, principal and schema events
--- The test objects are removed before the batch completes.
--- ============================================================
+-- TEST 10: Generate permission, role, principal and schema events.
+-- Expected: the audit specification captures each one; the test objects are
+-- removed before the batch completes.
 DROP TABLE IF EXISTS dbo.AuditMatrixTestTable;
 
 IF USER_ID('AuditMatrixTestUser') IS NOT NULL
@@ -2557,11 +2210,8 @@ WHERE database_name = 'GreenAcresEMS'
 ORDER BY event_time DESC;
 GO
 
--- ============================================================
 -- TEST 11: History retention moves old rows to the archive
 -- Expected: ArchivedRows = 1 and TestResult = PASS.
--- The outer rollback removes the artificial demonstration row.
--- ============================================================
 BEGIN TRANSACTION;
 
 INSERT dbo.AuditLog
@@ -2582,17 +2232,9 @@ WHERE TableName = 'RetentionTest'
 ROLLBACK TRANSACTION;
 GO
 
--- ============================================================
--- TEST 12: Login audit evidence
---
--- To generate a FAILED login:
---   1. Open a second SSMS connection.
---   2. Choose SQL Server Authentication.
---   3. Enter a real login name but an intentionally wrong password once.
---   4. Return here, wait a few seconds and run this query.
---
--- LGIF = failed login, LGIS = successful login.
--- ============================================================
+-- TEST 12: Login audit evidence (LGIF = failed login, LGIS = successful).
+-- Expected: LGIF rows after you open a second SSMS connection with SQL Server
+-- Authentication, enter a real login with a wrong password, then re-run this.
 USE master;
 GO
 
@@ -2612,27 +2254,16 @@ PRINT 'Auditing test cases completed.';
 GO
 
 
-
-/* ================================================================
+/* ========================================================================
    SECTION D: BACKUP, RECOVERY & AVAILABILITY
-
-   Goal: Prove the Availability side of CIA. Confidentiality and
-   Integrity mean nothing if the data cannot be brought back after
-   a failure, and a backup nobody has ever restored is only a hope.
-
-   Run AFTER the backup section of the build script has executed
-   (the .bak / .trn files must already exist in C:\EMS_Backups).
-   ================================================================ */
+   Goal: Prove the Availability side of CIA.
+   ======================================================================== */
 
 USE master;
 GO
 
--- ----------------------------------------------------------------
 -- D1: The recovery model still allows point-in-time recovery
--- Expected: recovery_model_desc = FULL. In SIMPLE recovery, log
---           backups are impossible and no point-in-time restore
---           could ever be offered to the client.
--- ----------------------------------------------------------------
+-- Expected: recovery_model_desc = FULL.
 SELECT
     name AS DatabaseName,
     recovery_model_desc,
@@ -2643,11 +2274,9 @@ WHERE name IN ('GreenAcresEMS', 'GreenAcresEMS_Restore');
 GO
 
 
--- ----------------------------------------------------------------
 -- D2: All three backup types were actually taken
--- Expected: One row each for Full, Differential and Transaction
---           Log, all for GreenAcresEMS, all with is_damaged = 0.
--- ----------------------------------------------------------------
+-- Expected: One row each for Full, Differential and Transaction Log, all for
+-- GreenAcresEMS, all with is_damaged = 0.
 SELECT
     CASE bs.type
         WHEN 'D' THEN 'Full'
@@ -2670,12 +2299,8 @@ ORDER BY bs.backup_start_date DESC;
 GO
 
 
--- ----------------------------------------------------------------
 -- D3: The backup files are readable and not corrupt
 -- Expected: "The backup set on file 1 is valid." for each file.
---           WITH CHECKSUM re-verifies the page checksums that were
---           written during the backup.
--- ----------------------------------------------------------------
 RESTORE VERIFYONLY FROM DISK = 'C:\EMS_Backups\GreenAcresEMS_FULL.bak' WITH CHECKSUM;
 GO
 RESTORE VERIFYONLY FROM DISK = 'C:\EMS_Backups\GreenAcresEMS_DIFF.bak' WITH CHECKSUM;
@@ -2684,13 +2309,8 @@ RESTORE VERIFYONLY FROM DISK = 'C:\EMS_Backups\GreenAcresEMS_LOG.trn'  WITH CHEC
 GO
 
 
--- ----------------------------------------------------------------
 -- D4: The KEY MATERIAL was backed up too
--- Expected: All three files exist (FileExists = 1). This is the
---           test that catches the classic mistake - without the
---           certificate and its private key, every encrypted
---           column in a restored copy is lost forever.
--- ----------------------------------------------------------------
+-- Expected: All three files exist (FileExists = 1).
 DECLARE @Info TABLE (
     Label       NVARCHAR(60),
     FilePath    NVARCHAR(300),
@@ -2722,12 +2342,8 @@ FROM @Info;
 GO
 
 
--- ----------------------------------------------------------------
 -- D5: The restore rehearsal produced a usable database
--- Expected: LiveRows = RestoredRows for every table. If the
---           restored copy is missing, the restore section of the
---           build script has not been run yet.
--- ----------------------------------------------------------------
+-- Expected: LiveRows = RestoredRows for every table.
 IF DB_ID('GreenAcresEMS_Restore') IS NULL
 BEGIN
     PRINT 'SKIP: GreenAcresEMS_Restore does not exist - run the restore section first.';
@@ -2761,11 +2377,8 @@ END;
 GO
 
 
--- ----------------------------------------------------------------
 -- D6: The audit trail survived the restore
 -- Expected: The restored copy still carries its AuditLog history.
---           Recovery must not quietly discard the evidence trail.
--- ----------------------------------------------------------------
 IF DB_ID('GreenAcresEMS_Restore') IS NOT NULL
 BEGIN
     SELECT TOP 5
@@ -2776,13 +2389,9 @@ END;
 GO
 
 
--- ----------------------------------------------------------------
 -- D7: Encrypted data is STILL encrypted in the restored copy
--- Expected: Ciphertext, not readable text - and no way to decrypt
---           it there, because the restored database has no
---           certificate of its own. This is the whole reason D4
---           matters.
--- ----------------------------------------------------------------
+-- Expected: Ciphertext, not readable text - and no way to decrypt it there,
+-- because the restored database has no certificate of its own.
 IF DB_ID('GreenAcresEMS_Restore') IS NOT NULL
 BEGIN
     SELECT TOP 3
@@ -2794,31 +2403,22 @@ END;
 GO
 
 
--- ----------------------------------------------------------------
 -- D8: No corrupt pages anywhere
--- Expected: ZERO rows. Any row here means SQL Server has met a
---           damaged page and the backup chain is about to be
---           needed for real.
--- ----------------------------------------------------------------
+-- Expected: ZERO rows. Any row here means SQL Server has met a damaged page and
+-- the backup chain is about to be needed for real.
 SELECT * FROM msdb.dbo.suspect_pages;
 GO
 
 
--- ----------------------------------------------------------------
 -- D9: Integrity check of the live database
--- Expected: "CHECKDB found 0 allocation errors and 0 consistency
---           errors in database 'GreenAcresEMS'."
--- ----------------------------------------------------------------
+-- Expected: "CHECKDB found 0 allocation errors and 0 consistency errors in
+-- database 'GreenAcresEMS'."
 DBCC CHECKDB ('GreenAcresEMS') WITH NO_INFOMSGS, ALL_ERRORMSGS;
 GO
 
 
--- ----------------------------------------------------------------
--- D10: How much data would we lose right now? (RPO check)
--- Expected: MinutesSinceLastLogBackup should be small. It measures
---           the real recovery point objective: everything since
---           that moment would be lost if the disk failed now.
--- ----------------------------------------------------------------
+-- D10: How much data would we lose right now?
+-- Expected: MinutesSinceLastLogBackup should be small.
 SELECT
     MAX(CASE WHEN type = 'D' THEN backup_finish_date END) AS LastFullBackup,
     MAX(CASE WHEN type = 'I' THEN backup_finish_date END) AS LastDiffBackup,
@@ -2834,23 +2434,19 @@ PRINT 'Backup and recovery test cases completed.';
 GO
 
 
-
-/* ================================================================
+/* ========================================================================
    SECTION E: LOGIN AUDITING (UserLoginLog + LOGON TRIGGER)
-
-   Goal: Prove that dbo.UserLoginLog is real, populated audit
-   evidence rather than an empty table, and that it is protected
-   from the roles it is meant to watch.
-   ================================================================ */
+   Goal: Prove that dbo.UserLoginLog is real, populated audit evidence rather
+   than an empty table, and that it is protected from the roles it is meant to
+   watch.
+   ======================================================================== */
 
 USE GreenAcresEMS;
 GO
 
--- ----------------------------------------------------------------
 -- E1: The logon trigger exists and is enabled
--- Expected: One row, is_disabled = 0. If the row is missing, the
---           build script could not impersonate 'sa' and said so.
--- ----------------------------------------------------------------
+-- Expected: One row, is_disabled = 0. If the row is missing, the build script
+-- could not impersonate 'sa' and said so.
 SELECT
     name        AS TriggerName,
     is_disabled AS IsDisabled,
@@ -2860,13 +2456,10 @@ WHERE name = 'trg_ServerLogon_AuditLogin';
 GO
 
 
--- ----------------------------------------------------------------
 -- E2: A successful application login is recorded
--- Expected: 'Login Successful' from the procedure, then a matching
---           UserLoginLog row with IsSuccessful = 1.
---           (B7 already cleared irfan.hakim's forced-reset flag; if
---           this returns 'Password Change Required', run B7 first.)
--- ----------------------------------------------------------------
+-- Expected: 'Login Successful' from the procedure, then a matching UserLoginLog
+-- row with IsSuccessful = 1. (B7 already cleared irfan.hakim's forced-reset
+-- flag; if this returns 'Password Change Required', run B7 first.)
 EXEC dbo.usp_VerifySystemUserPassword
     @LoginName     = 'irfan.hakim',
     @PlainPassword = 'IrfanSecure@2026';
@@ -2878,12 +2471,9 @@ ORDER BY LogID DESC;
 GO
 
 
--- ----------------------------------------------------------------
 -- E3: A FAILED application login is recorded, with a reason
--- Expected: 'Invalid Login' from the procedure, and a new
---           UserLoginLog row with IsSuccessful = 0 and
---           FailureReason = 'Incorrect password'.
--- ----------------------------------------------------------------
+-- Expected: 'Invalid Login' from the procedure, and a new UserLoginLog row with
+-- IsSuccessful = 0 and FailureReason = 'Incorrect password'.
 EXEC dbo.usp_VerifySystemUserPassword
     @LoginName     = 'irfan.hakim',
     @PlainPassword = 'DefinitelyTheWrongPassword';
@@ -2895,14 +2485,10 @@ ORDER BY LogID DESC;
 GO
 
 
--- ----------------------------------------------------------------
--- E4: An attempt on an unknown account is logged, but the error
---     message gives nothing away
+-- E4: An attempt on an unknown account is logged, but the error message gives
+-- nothing away
 -- Expected: The caller sees the same generic 'Invalid Login', while
---           UserLoginLog records 'Unknown or inactive account'.
---           This stops an attacker using the error text to work out
---           which user names exist.
--- ----------------------------------------------------------------
+-- UserLoginLog records 'Unknown or inactive account'.
 EXEC dbo.usp_VerifySystemUserPassword
     @LoginName     = 'no.such.person',
     @PlainPassword = 'Whatever@2026';
@@ -2915,23 +2501,18 @@ ORDER BY LogID DESC;
 GO
 
 
--- ----------------------------------------------------------------
 -- E5: Brute-force detection
--- Expected: After the failures above, 'no.such.person' and/or
---           'irfan.hakim' appear once the threshold is reached.
---           Threshold lowered to 1 here so the test is repeatable.
--- ----------------------------------------------------------------
+-- Expected: After the failures above, 'no.such.person' and/or 'irfan.hakim'
+-- appear once the threshold is reached.
 EXEC dbo.usp_ReportSuspiciousLogins
     @WindowMinutes = 60,
     @FailThreshold = 1;
 GO
 
 
--- ----------------------------------------------------------------
 -- E6: Session length is tracked (login -> logout)
--- Expected: The chosen row shows a LogoutTime and a SessionMinutes
---           value instead of an open-ended session.
--- ----------------------------------------------------------------
+-- Expected: The chosen row shows a LogoutTime and a SessionMinutes value
+-- instead of an open-ended session.
 DECLARE @OpenLogID INT =
     (SELECT MAX(LogID) FROM dbo.UserLoginLog
      WHERE IsSuccessful = 1 AND LogoutTime IS NULL);
@@ -2949,11 +2530,9 @@ END;
 GO
 
 
--- ----------------------------------------------------------------
 -- E7: Login history joins cleanly to staff and department
--- Expected: FullName and DepartmentName are filled in for rows
---           belonging to known EMS staff.
--- ----------------------------------------------------------------
+-- Expected: FullName and DepartmentName are filled in for rows belonging to
+-- known EMS staff.
 SELECT TOP 10
     LogID, LoginName, FullName, DepartmentName, UserRole,
     LoginTime, IsSuccessful
@@ -2962,11 +2541,8 @@ ORDER BY LogID DESC;
 GO
 
 
--- ----------------------------------------------------------------
 -- E8: Login history is NOT readable by the watched roles
--- Expected: 'PASS' for both. Otherwise a developer could profile
---           who works when, and confirm which accounts exist.
--- ----------------------------------------------------------------
+-- Expected: 'PASS' for both.
 EXECUTE AS USER = 'hakim.zulkifli';    -- role_Analyst
     BEGIN TRY
         SELECT TOP 1 * FROM dbo.UserLoginLog;
@@ -2990,13 +2566,10 @@ REVERT;
 GO
 
 
--- ----------------------------------------------------------------
 -- E9: Forced password reset on the onboarding password
--- Expected: 'Password Change Required' - the password is CORRECT
---           but the account is still on the shared onboarding
---           secret, so the login is not completed until it is
---           replaced. Then 'Login Successful' after the change.
--- ----------------------------------------------------------------
+-- Expected: 'Password Change Required' - the password is CORRECT but the
+-- account is still on the shared onboarding secret, so the login is not
+-- completed until it is replaced.
 SELECT TOP 5 LoginName, PasswordMustChange, PasswordLastUpdated
 FROM dbo.SystemUsers
 ORDER BY SystemUserID;
@@ -3025,20 +2598,8 @@ END;
 GO
 
 
--- ----------------------------------------------------------------
--- E10: Failed SERVER logins come from the audit file, not the
---      logon trigger
+-- E10: Failed SERVER logins come from the audit file, not the logon trigger
 -- Expected: LGIF rows for any wrong-password connection attempt.
---      A logon trigger cannot see these - the connection is
---      rejected before it fires - which is why the Server Audit
---      Specification carries FAILED_LOGIN_GROUP.
---
---      To generate evidence: open a second SSMS connection, choose
---      SQL Server Authentication, enter a real EMS login with a
---      wrong password once, then run this query.
---
---      Requires CONTROL SERVER (sysadmin) to read the audit file.
--- ----------------------------------------------------------------
 SELECT TOP 20
     event_time,
     action_id,
@@ -3056,6 +2617,6 @@ PRINT 'Login auditing test cases completed.';
 GO
 
 
-/* ================================================================
+/* ========================================================================
    END OF TEST_CASES.SQL
-   ================================================================ */
+   ======================================================================== */

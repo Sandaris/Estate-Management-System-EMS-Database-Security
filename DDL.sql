@@ -1,70 +1,20 @@
 /* ========================================================================
-   DDL.sql
-   Green Acres Realty Sdn Bhd - Estate Management System (EMS)
+   DDL.sql - Green Acres Realty Sdn Bhd, Estate Management System (EMS)
    CT069-3-3 Database Security Assignment
 
-   WHAT THIS FILE IS
-   The Data Definition half of the build. Everything in here DEFINES
-   structure - it creates or alters objects, and it grants or denies
-   permissions on them. It does not load a single row of data.
+   Structure only: tables, roles, users, permissions, views, procedures,
+   masking, keys, audit objects and triggers. Loads no data.
 
-   Its companion, DML.sql, holds the data and the operations: the seed
-   INSERTs, the encryption and hashing UPDATEs, the backup and restore
-   steps, and the full test suite. Between them the two files build
-   the complete GreenAcresEMS database: DDL.sql defines every object,
-   DML.sql fills and exercises it.
-
-   RUN ORDER - THIS MATTERS
-       1. DDL.sql  (this file)  - builds the empty, secured structure
-       2. DML.sql               - loads data, protects it, backs it up,
-                                  then tests everything
-   DDL.sql begins by DROPPING and recreating the GreenAcresEMS database,
-   so running it again wipes the data and DML.sql must be re-run after it.
-
-   Wherever a piece of DML used to sit inside this build, a
-   "-- >>> MOVED TO DML.sql" marker is left in its place, so the two files
-   can be read side by side.
-
-   WHAT COUNTS AS "DDL" HERE
-   CREATE / ALTER / DROP of the database, tables, constraints, indexes,
-   views, stored procedures, triggers, certificates and keys, and the
-   SQL Server Audit objects.
-
-   Permission statements (roles, logins, users, GRANT, DENY) are strictly
-   DCL rather than DDL, but they are kept in this file on purpose: they
-   define the security structure, and a permission cannot be granted on a
-   view or procedure before that object exists. Keeping them here means
-   the whole security model is defined in one place.
-
-   CONTENTS
-     1.  Database creation and pre-build clean-up
-     2.  Tables - 14 tables, constraints, indexes
-     3.  Roles - 6 database roles
-     4.  Logins and users - 12 named staff accounts
-     5.  Permissions - table, view and procedure level GRANT / DENY
-     6.  Views - 9 views
-     7.  Stored procedures - 20 procedures
-     8.  Dynamic Data Masking - 19 masked columns
-     9.  Keys and certificate, and the encrypted / hashed columns
-     10. Controlled decryption procedures
-     11. Recovery model
-     12. Audit tables, archive procedure and audit permissions
-     13. Server Audit and Database Audit Specification
-     14. Login auditing objects (LOGON trigger and reporting views)
-     15. Triggers - 8 audit, 4 operational
+   RUN THIS FIRST, THEN DML.sql. This file drops and recreates the
+   GreenAcresEMS database, so re-running it means re-running DML.sql too.
+   Connect as sysadmin. See README.md for the full design discussion.
    ======================================================================== */
-
-
 
 
 USE master;
 GO
 
 -- Remove the logon trigger from any previous run FIRST.
--- It reads GreenAcresEMS.dbo.SystemUsers, so leaving it in place while the
--- database is being dropped and rebuilt is asking for confusing errors.
--- (Its own TRY/CATCH means it could never actually block a login, but a
--- clean build should not depend on that safety net.)
 IF EXISTS (SELECT 1 FROM sys.server_triggers WHERE name = 'trg_ServerLogon_AuditLogin')
 BEGIN
     DROP TRIGGER trg_ServerLogon_AuditLogin ON ALL SERVER;
@@ -93,8 +43,8 @@ USE GreenAcresEMS;
 GO
 
 
---    Enhanced: added PropertyType, Bedrooms, Bathrooms,
---    Sizesqft, IsActive for richer operational data.
+-- Enhanced: added PropertyType, Bedrooms, Bathrooms, Sizesqft, IsActive for
+-- richer operational data.
 
 /* ========================================================================
    REQUIREMENT 12: ADD NEW TABLE OR EDIT EXISTING TABLE
@@ -119,8 +69,7 @@ CREATE TABLE Properties (
 );
 GO
 
---    Enhanced: added NRIC (for encryption later), ClientType,
---    IsActive. Sensitive PII columns flagged in comments.
+-- Enhanced: added NRIC (for encryption later), ClientType, IsActive.
 CREATE TABLE Clients (
     ClientID        INT             IDENTITY(1,1)   PRIMARY KEY,
     FullName        NVARCHAR(100)   NOT NULL,
@@ -134,8 +83,7 @@ CREATE TABLE Clients (
     RegisteredDate  DATETIME        NOT NULL        DEFAULT GETDATE()
 );
 GO
---    Enhanced: added DepartmentID (FK), LicenseNumber,
---    IsActive. CommissionRate is sensitive financial data.
+-- Enhanced: added DepartmentID (FK), LicenseNumber, IsActive.
 CREATE TABLE Agents (
     AgentID         INT             IDENTITY(1,1)   PRIMARY KEY,
     FullName        NVARCHAR(100)   NOT NULL,
@@ -148,8 +96,8 @@ CREATE TABLE Agents (
     JoinedDate      DATETIME        NOT NULL        DEFAULT GETDATE()
 );
 GO
---    Enhanced: added RentEndDate, PaymentStatus,
---    PaymentMethod for lease/sale lifecycle tracking.
+-- Enhanced: added RentEndDate, PaymentStatus, PaymentMethod for lease/sale
+-- lifecycle tracking.
 CREATE TABLE Transactions (
     TransactionID   INT             IDENTITY(1,1)   PRIMARY KEY,
     PropertyID      INT             NOT NULL
@@ -170,8 +118,8 @@ CREATE TABLE Transactions (
 );
 GO
 
---    Enhanced: added AssignedStaffID, Priority, CompletedDate,
---    EstimatedCost, ActualCost for full work-order tracking.
+-- Enhanced: added AssignedStaffID, Priority, CompletedDate, EstimatedCost,
+-- ActualCost for full work-order tracking.
 CREATE TABLE MaintenanceRequests (
     RequestID       INT             IDENTITY(1,1)   PRIMARY KEY,
     PropertyID      INT             NOT NULL
@@ -191,9 +139,8 @@ CREATE TABLE MaintenanceRequests (
 GO
 
 
-
---    Represents the IT and business departments formed during
---    the company's expansion. Used to scope roles/users.
+-- Represents the IT and business departments formed during the company's
+-- expansion.
 CREATE TABLE Departments (
     DepartmentID    INT             IDENTITY(1,1)   PRIMARY KEY,
     DepartmentName  NVARCHAR(100)   NOT NULL        UNIQUE,
@@ -204,10 +151,8 @@ CREATE TABLE Departments (
 GO
 
 
---    Internal IT/staff users who access the EMS database
---    (developers, DBAs, analysts). NOT end-user clients.
---    Passwords stored as hashes (applied later by Irfan).
---    Linked to SQL Server logins via LoginName.
+-- Internal IT/staff users who access the EMS database (developers, DBAs,
+-- analysts).
 CREATE TABLE SystemUsers (
     SystemUserID    INT             IDENTITY(1,1)   PRIMARY KEY,
     DepartmentID    INT             NOT NULL
@@ -215,11 +160,7 @@ CREATE TABLE SystemUsers (
     FullName        NVARCHAR(100)   NOT NULL,
     LoginName       NVARCHAR(100)   NOT NULL        UNIQUE, -- matches SQL Server login
     Email           NVARCHAR(100)   NOT NULL,               -- [SENSITIVE - will be masked]
-    -- LEGACY, INHERITED FROM THE ORIGINAL DEVELOPERS. These two columns are
-    -- created and populated only so the migration can be shown end to end;
-    -- the hashing section later replaces them with PasswordHashSecure /
-    -- PasswordSaltSecure (SHA2_512 over a 32-byte random salt) and then
-    -- DROPS them. They must not appear in the final data dictionary.
+    -- LEGACY, INHERITED FROM THE ORIGINAL DEVELOPERS.
     PasswordHash    VARBINARY(64)   NULL,                   -- [DEPRECATED - weak SHA2_256]
     PasswordSalt    NVARCHAR(50)    NULL,                   -- [DEPRECATED - salt in plain text]
     UserRole        NVARCHAR(50)    NOT NULL
@@ -231,9 +172,7 @@ CREATE TABLE SystemUsers (
 );
 GO
 
---    Tracks every login attempt (success + failure) against
---    the EMS. Supports both server-level and DB-level audit.
---    Populated by a trigger + SQL Server Audit (Kai Wen).
+-- Tracks every login attempt (success + failure) against the EMS.
 CREATE TABLE UserLoginLog (
     LogID           INT             IDENTITY(1,1)   PRIMARY KEY,
     SystemUserID    INT             NULL            -- NULL if login name not matched
@@ -249,9 +188,8 @@ CREATE TABLE UserLoginLog (
 GO
 
 
---    Central audit trail for all DML events (INSERT, UPDATE,
---    DELETE) across sensitive tables. Populated by triggers
---    (Sarvein). Schema mirrors a generic change-capture table.
+-- Central audit trail for all DML events (INSERT, UPDATE, DELETE) across
+-- sensitive tables.
 CREATE TABLE AuditLog (
     AuditID         INT             IDENTITY(1,1)   PRIMARY KEY,
     EventTime       DATETIME        NOT NULL        DEFAULT GETDATE(),
@@ -268,12 +206,8 @@ CREATE TABLE AuditLog (
 GO
 
 
--- 10. LeaseAgreements
---     Formalises rental agreements between clients and
---     properties. Supports the rental lifecycle (active,
---     expired, terminated). Linked to a Transaction.
---     Security note: AgreementDocPath may point to an
---     encrypted document blob.
+-- 10. LeaseAgreements - Formalises rental agreements between clients and
+-- properties.
 CREATE TABLE LeaseAgreements (
     LeaseID             INT             IDENTITY(1,1)   PRIMARY KEY,
     TransactionID       INT             NOT NULL        UNIQUE  -- 1 lease per rental transaction
@@ -295,10 +229,8 @@ CREATE TABLE LeaseAgreements (
 GO
 
 
--- 11. CommissionPayments
---     Tracks commission earned and paid to agents per
---     transaction. Required for financial integrity and
---     analytics. Sensitive financial data; access restricted.
+-- 11. CommissionPayments - Tracks commission earned and paid to agents per
+-- transaction.
 CREATE TABLE CommissionPayments (
     CommissionID    INT             IDENTITY(1,1)   PRIMARY KEY,
     TransactionID   INT             NOT NULL
@@ -315,9 +247,7 @@ CREATE TABLE CommissionPayments (
 GO
 
 
--- 12. MaintenanceStaff
---     Tracks in-house or contracted maintenance workers.
---     Linked to MaintenanceRequests for job assignment.
+-- 12. MaintenanceStaff - Tracks in-house or contracted maintenance workers.
 CREATE TABLE MaintenanceStaff (
     StaffID         INT             IDENTITY(1,1)   PRIMARY KEY,
     FullName        NVARCHAR(100)   NOT NULL,
@@ -336,10 +266,8 @@ ALTER TABLE MaintenanceRequests
         CONSTRAINT FK_Maint_Staff FOREIGN KEY REFERENCES MaintenanceStaff(StaffID);
 GO
 
--- 13. Notifications
---     Stores system notifications sent to clients or agents
---     (lease expiry reminders, maintenance updates, etc.).
---     Supports the operational trigger work (Sarvein).
+-- 13. Notifications - Stores system notifications sent to clients or agents
+-- (lease expiry reminders, maintenance updates, etc.).
 CREATE TABLE Notifications (
     NotificationID  INT             IDENTITY(1,1)   PRIMARY KEY,
     RecipientType   NVARCHAR(20)    NOT NULL
@@ -359,29 +287,16 @@ GO
 
 
 -- >>> MOVED TO DML.sql: Seed data for all 10 tables (467 rows)
---     This file defines structure only. Run DDL.sql first, then DML.sql.
-
 
 
 USE GreenAcresEMS;
 GO
 
 
-
--- ------------------------------------------------------------------------
--- Clean-up before creating principals
---
--- Database-scoped principals (roles + users) do NOT need to be dropped
--- here: the DROP DATABASE / CREATE DATABASE at the very top of this script
--- already destroyed every role and user that lived inside GreenAcresEMS.
---
--- Server-scoped LOGINS survive DROP DATABASE, so re-running this script on
--- the same instance leaves the 12 EMS logins behind as orphans. We drop
--- them here so the script is fully repeatable. Each DROP is wrapped in
--- TRY/CATCH because a login cannot be dropped while it still owns objects
--- or has an open session - in that case we report it and carry on instead
--- of aborting the whole build.
--- ------------------------------------------------------------------------
+-- Clean-up before creating principals Database-scoped principals (roles +
+-- users) do NOT need to be dropped here: the DROP DATABASE / CREATE DATABASE at
+-- the very top of this script already destroyed every role and user that lived
+-- inside GreenAcresEMS.
 DECLARE @EmsLogins TABLE (LoginName SYSNAME);
 
 INSERT INTO @EmsLogins (LoginName)
@@ -439,19 +354,9 @@ GO
 
 /* ========================================================================
    REQUIREMENT 4: USER (AND PERMISSIONS)
-
-   Every IT staff member gets their OWN login with a UNIQUE password, so
-   that the audit trail (ORIGINAL_LOGIN()) can attribute every change to a
-   single named person. Shared accounts would destroy accountability.
-
-   CHECK_POLICY     = ON -> Windows complexity rules are enforced.
-   CHECK_EXPIRATION = ON -> the login is subject to the password-age policy.
-
-   NOTE FOR MARKING: the passwords below are written in clear text only
-   because this is a build script that has to be handed in and re-run by
-   the lecturer. In production these would be supplied at run time from a
-   secrets vault (or the logins would be Windows/Entra ID authenticated),
-   never committed to a script file.
+   Every IT staff member gets their OWN login with a UNIQUE password, so that
+   the audit trail (ORIGINAL_LOGIN()) can attribute every change to a single
+   named person.
    ======================================================================== */
 IF SUSER_ID('arun.kumar') IS NULL
     CREATE LOGIN [arun.kumar] WITH PASSWORD = 'Dba#Arun!7fK2026',
@@ -587,22 +492,10 @@ ALTER ROLE role_ReadOnly ADD MEMBER [nurul.huda];
 GO
 
 
-
 GRANT CONTROL ON DATABASE::GreenAcresEMS TO role_DBA;
 GO
 
--- ------------------------------------------------------------------------
 -- Server-level permission for the DBA logins.
---
--- CONTROL ON DATABASE (above) covers everything INSIDE GreenAcresEMS, but
--- creating or dropping a LOGIN is a server-level action. Without this the
--- DBAs would get "permission denied" the moment they ran usp_ProvisionUser,
--- which is exactly the job we built that procedure for.
---
--- ALTER ANY LOGIN is granted instead of adding them to the securityadmin
--- fixed server role, because securityadmin can also GRANT server-level
--- permissions to itself and is effectively a path to sysadmin.
--- ------------------------------------------------------------------------
 USE master;
 GO
 
@@ -785,8 +678,8 @@ AS
 GO
 
 
---   4.8  View-Level Permission Grants
---   Read-only and Analyst roles get SELECT on views only. (role_ReadOnly gets data without any base-table permission.)
+-- 4.8 View-Level Permission Grants Read-only and Analyst roles get SELECT on
+-- views only.
 
 -- role_Admin: All views (Direct table access)
 GRANT SELECT ON vw_PropertyListing     TO role_Admin;
@@ -826,8 +719,8 @@ GRANT SELECT ON vw_MaintenanceOverview TO role_ReadOnly;
 GO
 
 
---      When ClientID is NULL = INSERT new client
---      When ClientID is Non-NULL= UPDATE info (Only selected details)
+-- When ClientID is NULL = INSERT new client When ClientID is Non-NULL= UPDATE
+-- info (Only selected details)
 
 
 /* ========================================================================
@@ -1178,28 +1071,9 @@ END;
 GO
 
 
-
--- ------------------------------------------------------------------------
--- usp_ProvisionUser
---
--- Single, auditable entry point for onboarding a new IT staff member:
--- creates the login, the database user and the role membership in one step.
---
--- SECURITY NOTES
---   1. CREATE LOGIN / CREATE USER / ALTER ROLE cannot be parameterised, so
---      dynamic SQL is unavoidable here. Every identifier is therefore
---      wrapped in QUOTENAME() and @LoginName is validated against a strict
---      whitelist first, which closes the SQL-injection hole that plain
---      string concatenation would leave open.
---   2. The password IS passed as a real parameter to sp_executesql, so it
---      never becomes part of the executable SQL text and cannot break out
---      of its quotes.
---   3. Dynamic SQL breaks ownership chaining, so the CALLER (not the
---      procedure owner) needs the underlying permissions. The caller must
---      hold server-level ALTER ANY LOGIN plus ALTER ANY USER in this
---      database. That is why EXECUTE is granted to role_DBA only, and why
---      the two DBA logins are granted ALTER ANY LOGIN further down.
--- ------------------------------------------------------------------------
+-- usp_ProvisionUser: Single, auditable entry point for onboarding a new IT
+-- staff member: creates the login, the database user and the role membership in
+-- one step.
 CREATE OR ALTER PROCEDURE dbo.usp_ProvisionUser
     @LoginName NVARCHAR(100),
     @Password  NVARCHAR(128),
@@ -1208,9 +1082,9 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    -- Make sure no empty information is given (checked FIRST, because
-    -- "NULL NOT IN (...)" evaluates to UNKNOWN and would fall through the
-    -- role check below without ever raising an error).
+    -- Make sure no empty information is given (checked FIRST, because "NULL NOT
+    -- IN (...)" evaluates to UNKNOWN and would fall through the role check
+    -- below without ever raising an error).
     IF @LoginName IS NULL OR LTRIM(RTRIM(@LoginName)) = ''
        OR @Password IS NULL OR @Password = ''
        OR @RoleName IS NULL OR LTRIM(RTRIM(@RoleName)) = ''
@@ -1230,9 +1104,7 @@ BEGIN
     END;
 
     -- Whitelist the login name: letters, digits, dot, underscore and hyphen
-    -- only. This rejects brackets, quotes, semicolons and comment markers,
-    -- so an injected payload such as  x];DROP TABLE dbo.Clients--
-    -- can never reach the dynamic SQL below.
+    -- only.
     IF @LoginName LIKE '%[^a-zA-Z0-9._-]%'
     BEGIN
         RAISERROR('LoginName may only contain letters, digits, dot, underscore or hyphen.', 16, 1);
@@ -1256,7 +1128,6 @@ BEGIN
 
     BEGIN TRY
         -- Step 1: Create server-level login with password policy.
-        --         @Password travels as a bound parameter, not as text.
         SET @sql = N'CREATE LOGIN ' + QUOTENAME(@LoginName)
                  + N' WITH PASSWORD = @pwd, CHECK_POLICY = ON, CHECK_EXPIRATION = ON;';
         EXEC sys.sp_executesql @sql, N'@pwd NVARCHAR(128)', @pwd = @Password;
@@ -1277,8 +1148,8 @@ BEGIN
         PRINT @LoginName + ' added successfully.';
     END TRY
     BEGIN CATCH
-        -- Surface the real reason (usually "permission denied" when the
-        -- caller is not a sysadmin / has no ALTER ANY LOGIN).
+        -- Surface the real reason (usually "permission denied" when the caller
+        -- is not a sysadmin / has no ALTER ANY LOGIN).
         DECLARE @msg NVARCHAR(2048) = N'usp_ProvisionUser failed: ' + ERROR_MESSAGE();
         RAISERROR(@msg, 16, 1);
     END CATCH;
@@ -1286,14 +1157,10 @@ END;
 GO
 
 
--- ------------------------------------------------------------------------
--- usp_DeprovisionUser
---
--- Offboarding counterpart to usp_ProvisionUser: strips role membership,
--- drops the database user, then drops the server login - in that order,
--- because SQL Server refuses to drop a login that still has a mapped user.
--- Same QUOTENAME hardening and same caller-permission requirement as above.
--- ------------------------------------------------------------------------
+-- usp_DeprovisionUser: Offboarding counterpart to usp_ProvisionUser: strips
+-- role membership, drops the database user, then drops the server login - in
+-- that order, because SQL Server refuses to drop a login that still has a
+-- mapped user.
 CREATE OR ALTER PROCEDURE dbo.usp_DeprovisionUser
     @LoginName NVARCHAR(100)
 AS
@@ -1367,8 +1234,8 @@ BEGIN
 END;
 GO
 
---   5.13  Procedure-Level Execute Grants
---   (Roles receive EXECUTE only on procedures relevant to their job function)
+-- 5.13 Procedure-Level Execute Grants (Roles receive EXECUTE only on procedures
+-- relevant to their job function)
 
 -- Admin: All procedures (Full operational scope)
 GRANT EXECUTE ON dbo.usp_ManageClient           TO role_Admin;
@@ -1381,10 +1248,8 @@ GRANT EXECUTE ON dbo.usp_UpdateTransactionStatus TO role_Admin;
 GRANT EXECUTE ON dbo.usp_LogMaintenanceRequest  TO role_Admin;
 GRANT EXECUTE ON dbo.usp_AssignMaintenanceStaff TO role_Admin;
 GRANT EXECUTE ON dbo.usp_GetAgentTransactions   TO role_Admin;
--- User provisioning is a DBA duty, not a business-admin duty, so EXECUTE on
--- the two provisioning procedures goes to role_DBA only. (Creating a login
--- is a server-level act; letting a business Admin do it would let them mint
--- accounts in any role, including role_DBA, and quietly escalate privilege.)
+-- User provisioning is a DBA duty, not a business-admin duty, so EXECUTE on the
+-- two provisioning procedures goes to role_DBA only.
 GRANT EXECUTE ON dbo.usp_ProvisionUser			TO role_DBA;
 GRANT EXECUTE ON dbo.usp_DeprovisionUser		TO role_DBA;
 GO
@@ -1409,15 +1274,11 @@ GRANT EXECUTE ON dbo.usp_GetAgentTransactions   TO role_Analyst;
 GO
 
 
-
 -- >>> MOVED TO DML.sql: Role / view / procedure inventory queries
---     This file defines structure only. Run DDL.sql first, then DML.sql.
-
 
 
 USE GreenAcresEMS;
 GO
-
 
 
 IF NOT EXISTS (
@@ -1485,7 +1346,6 @@ END;
 GO
 
 
-
 IF NOT EXISTS (
     SELECT 1
     FROM sys.masked_columns
@@ -1535,7 +1395,6 @@ END;
 GO
 
 
-
 IF NOT EXISTS (
     SELECT 1
     FROM sys.masked_columns
@@ -1569,7 +1428,6 @@ END;
 GO
 
 
-
 IF NOT EXISTS (
     SELECT 1
     FROM sys.masked_columns
@@ -1585,7 +1443,6 @@ BEGIN
 ADD MASKED WITH (FUNCTION = 'random(1000, 100000)');
 END;
 GO
-
 
 
 IF NOT EXISTS (
@@ -1621,7 +1478,6 @@ END;
 GO
 
 
-
 IF NOT EXISTS (
     SELECT 1
     FROM sys.masked_columns
@@ -1637,7 +1493,6 @@ BEGIN
 ADD MASKED WITH (FUNCTION = 'email()');
 END;
 GO
-
 
 
 IF NOT EXISTS (
@@ -1689,7 +1544,6 @@ END;
 GO
 
 
-
 IF NOT EXISTS (
     SELECT 1
     FROM sys.masked_columns
@@ -1723,7 +1577,6 @@ END;
 GO
 
 
-
 IF NOT EXISTS (
     SELECT 1
     FROM sys.masked_columns
@@ -1741,44 +1594,13 @@ END;
 GO
 
 
-
 /* ========================================================================
    REQUIREMENT 7 (continued): MASKING - KNOWN LIMIT + ANALYST EXCEPTION
-
-   IMPORTANT LIMITATION, stated deliberately for the report:
-   Dynamic Data Masking is a PRESENTATION control, not a security boundary.
-   It masks the *column* in the output, but it does NOT mask the result of
-   an expression computed over that column. A user with no UNMASK permission
-   can therefore still recover real values, for example:
-
-       SELECT SUM(Amount) FROM dbo.Transactions;      -- returns REAL total
-       SELECT COUNT(*) FROM dbo.Clients WHERE Email = 'known@x.com';
-
-   Our own reporting views vw_MonthlySalesSummary and vw_AgentPerformance
-   aggregate Transactions.Amount, so the totals they return are real figures
-   even for roles that see Amount masked when they read the base table.
-
-   We handle this in two ways rather than pretending it does not happen:
-     1. DDM is layered BEHIND permissions (roles only reach the tables and
-        views their job needs) and behind auditing (SELECT on the sensitive
-        tables is captured by the Database Audit Specification). DDM is the
-        last layer, never the only one.
-     2. role_Analyst legitimately needs true financial figures - that is the
-        analytics department's entire job - so instead of leaving them with
-        an accidental bypass we grant them EXPLICIT, COLUMN-LEVEL UNMASK on
-        just the financial columns, and leave every PII column masked.
-        The permission is now intentional, documented and auditable.
-
-   Column-level UNMASK (GRANT UNMASK ON OBJECT::t(c)) requires SQL Server
-   2022 (major version 16) or Azure SQL. On SQL Server 2019 the only option
-   is database-wide UNMASK, which would also expose PII - so on 2019 we
-   deliberately grant nothing and accept the aggregate limitation instead.
+   IMPORTANT LIMITATION, stated deliberately for the report: Dynamic Data
+   Masking is a PRESENTATION control, not a security boundary.
    ======================================================================== */
--- The GRANT statements are issued through sp_executesql on purpose. Written
--- inline, the column-level UNMASK syntax would have to be PARSED by every
--- version of SQL Server that runs this script - and a SQL Server 2019 parser
--- would reject the whole batch before the version check below ever executed.
--- Dynamic SQL defers parsing until we already know the version is 2022+.
+-- Issued through sp_executesql so a SQL Server 2019 parser never sees the
+-- 2022-only column-level UNMASK syntax and rejects the whole batch.
 IF CAST(SERVERPROPERTY('ProductMajorVersion') AS INT) >= 16
 BEGIN
     PRINT 'SQL Server 2022+ detected: applying column-level UNMASK for role_Analyst.';
@@ -1793,7 +1615,6 @@ BEGIN
     -- NOTE what is deliberately NOT granted: Clients.NRIC, Clients.Email,
     -- Clients.ContactNumber, Clients.Address, Agents.ContactNumber,
     -- Agents.Email, SystemUsers.Email, MaintenanceStaff.ContactNumber.
-    -- Analysts get numbers, never identities.
 END
 ELSE
 BEGIN
@@ -1801,7 +1622,6 @@ BEGIN
     PRINT 'role_Analyst keeps masked columns; the aggregate limitation above is accepted and documented.';
 END;
 GO
-
 
 
 IF NOT EXISTS (
@@ -1842,7 +1662,6 @@ END;
 GO
 
 
-
 IF COL_LENGTH('dbo.Clients', 'NRIC_Encrypted') IS NULL
 BEGIN
     ALTER TABLE dbo.Clients
@@ -1872,9 +1691,7 @@ END;
 GO
 
 
-
 -- >>> MOVED TO DML.sql: Encrypting the Clients PII columns
---     This file defines structure only. Run DDL.sql first, then DML.sql.
 
 
 IF COL_LENGTH('dbo.LeaseAgreements', 'AgreementDocPath_Encrypted') IS NULL
@@ -1885,10 +1702,7 @@ END;
 GO
 
 
-
 -- >>> MOVED TO DML.sql: Encrypting LeaseAgreements.AgreementDocPath
---     This file defines structure only. Run DDL.sql first, then DML.sql.
-
 
 
 IF COL_LENGTH('dbo.SystemUsers', 'PasswordSaltSecure') IS NULL
@@ -1920,9 +1734,7 @@ END;
 GO
 
 
-
 -- >>> MOVED TO DML.sql: Generating the per-user salts and SHA2_512 hashes
---     This file defines structure only. Run DDL.sql first, then DML.sql.
 
 -- Forced-reset flag: 1 = still on the onboarding password.
 IF COL_LENGTH('dbo.SystemUsers', 'PasswordMustChange') IS NULL
@@ -1933,27 +1745,20 @@ END;
 GO
 
 
-/* ------------------------------------------------------------------------
-   REMOVING THE OLD, WEAKER CREDENTIAL STORE
-
-   The original developers stored credentials in two columns:
-       PasswordHash VARBINARY(64) -- HASHBYTES('SHA2_256', password + salt)
-       PasswordSalt NVARCHAR(50)  -- the salt, in PLAIN TEXT
-
-   Both are now superseded by PasswordHashSecure / PasswordSaltSecure, and
-   leaving them in place would be a real weakness, not just clutter:
-
-     * the salt sat next to the hash in a readable NVARCHAR column, so
-       anyone with SELECT on SystemUsers had everything needed to run an
-       offline dictionary attack;
-     * SHA2_256 over a short salt is far cheaper to brute-force than the
-       SHA2_512 over a 32-byte CRYPT_GEN_RANDOM salt we use now;
-     * two credential stores for one account means an attacker simply
-       attacks the weaker one.
-
-   So we drop them. The DEFAULT constraint has to go first, and the columns
-   are dropped only after the secure hashes above have been generated.
-   ------------------------------------------------------------------------ */
+/* ========================================================================
+   ------------------------------------------------------------------------
+   REMOVING THE OLD, WEAKER CREDENTIAL STORE The original developers stored
+   credentials in two columns: PasswordHash VARBINARY(64) --
+   HASHBYTES('SHA2_256', password + salt) PasswordSalt NVARCHAR(50) -- the salt,
+   in PLAIN TEXT Both are now superseded by PasswordHashSecure /
+   PasswordSaltSecure, and leaving them in place would be a real weakness, not
+   just clutter: * the salt sat next to the hash in a readable NVARCHAR column,
+   so anyone with SELECT on SystemUsers had everything needed to run an offline
+   dictionary attack; * SHA2_256 over a short salt is far cheaper to brute-force
+   than the SHA2_512 over a 32-byte CRYPT_GEN_RANDOM salt we use now; * two
+   credential stores for one account means an attacker simply attacks the weaker
+   one.
+   ======================================================================== */
 IF COL_LENGTH('dbo.SystemUsers', 'PasswordHash') IS NOT NULL
 BEGIN
     ALTER TABLE dbo.SystemUsers DROP COLUMN PasswordHash;
@@ -1967,7 +1772,6 @@ BEGIN
     PRINT 'Dropped legacy column SystemUsers.PasswordSalt (plain-text salt).';
 END;
 GO
-
 
 
 CREATE OR ALTER PROCEDURE dbo.usp_UpdateSystemUserPassword
@@ -2012,21 +1816,9 @@ END;
 GO
 
 
-
--- ------------------------------------------------------------------------
--- usp_VerifySystemUserPassword
---
--- Verifies an application-level login by re-hashing the supplied password
--- with the stored per-user salt and comparing the digests. The stored hash
--- is never reversed and the plain password is never written anywhere.
---
--- Every attempt - successful OR failed - is now recorded in
--- dbo.UserLoginLog, which is what turns that table into real audit
--- evidence instead of an empty schema object. Failed SERVER logins (wrong
--- SQL Server password at connect time) are captured separately by the
--- FAILED_LOGIN_GROUP action in the Server Audit Specification; this
--- procedure covers logins performed by the EMS application itself.
--- ------------------------------------------------------------------------
+-- usp_VerifySystemUserPassword: Verifies an application-level login by re-
+-- hashing the supplied password with the stored per-user salt and comparing the
+-- digests.
 CREATE OR ALTER PROCEDURE dbo.usp_VerifySystemUserPassword
     @LoginName NVARCHAR(100),
     @PlainPassword NVARCHAR(200)
@@ -2049,9 +1841,7 @@ BEGIN
 
     IF @StoredSalt IS NULL OR @StoredHash IS NULL
     BEGIN
-        -- Unknown or deactivated account. We log the attempt but return the
-        -- same generic message as a wrong password, so an attacker cannot
-        -- use the error text to enumerate valid user names.
+        -- Unknown or deactivated account.
         INSERT INTO dbo.UserLoginLog
             (SystemUserID, LoginName, IsSuccessful, HostName, FailureReason)
         VALUES
@@ -2079,8 +1869,8 @@ BEGIN
         DECLARE @LogID INT = SCOPE_IDENTITY();
 
         -- Correct password, but still the shared onboarding secret: the
-        -- credential is valid yet must not be usable for real work until
-        -- the account owner replaces it.
+        -- credential is valid yet must not be usable for real work until the
+        -- account owner replaces it.
         IF EXISTS (SELECT 1 FROM dbo.SystemUsers
                    WHERE LoginName = @LoginName AND PasswordMustChange = 1)
         BEGIN
@@ -2121,13 +1911,8 @@ END;
 GO
 
 
-
--- ------------------------------------------------------------------------
--- usp_RecordLogout
---
--- Closes off a session row in UserLoginLog so the audit trail shows how
--- long each account was connected, not just when it arrived.
--- ------------------------------------------------------------------------
+-- usp_RecordLogout: Closes off a session row in UserLoginLog so the audit trail
+-- shows how long each account was connected, not just when it arrived.
 CREATE OR ALTER PROCEDURE dbo.usp_RecordLogout
     @LogID INT
 AS
@@ -2147,13 +1932,9 @@ END;
 GO
 
 
-
--- ------------------------------------------------------------------------
--- usp_ReportSuspiciousLogins
---
--- Detection query for the DBA: any account with 3 or more failed attempts
--- inside a rolling window is reported as a possible brute-force attempt.
--- ------------------------------------------------------------------------
+-- usp_ReportSuspiciousLogins: Detection query for the DBA: any account with 3
+-- or more failed attempts inside a rolling window is reported as a possible
+-- brute-force attempt.
 CREATE OR ALTER PROCEDURE dbo.usp_ReportSuspiciousLogins
     @WindowMinutes  INT = 60,
     @FailThreshold  INT = 3
@@ -2177,33 +1958,14 @@ END;
 GO
 
 
-
 /* ========================================================================
    REQUIREMENT 6 (continued): CONTROLLED DECRYPTION PATH
-
-   Encrypting the data is only half the job - the business still has to be
-   able to READ it. Without the objects below, nothing except the database
-   owner could ever decrypt these columns, which would break Availability
-   (the "A" in CIA) for the sake of Confidentiality.
-
-   Design decision: the procedures are declared WITH EXECUTE AS OWNER.
-   That means the *procedure* opens the symmetric key using the certificate,
-   so we never have to hand CONTROL of the certificate to the calling role.
-   A caller who is granted EXECUTE can read the decrypted values through
-   this one narrow, auditable door and cannot use the key for anything else.
-
-   The audit triggers use ORIGINAL_LOGIN() rather than SYSTEM_USER, so
-   EXECUTE AS OWNER does NOT hide who the real caller was.
+   Encrypting the data is only half the job - the business still has to be able
+   to READ it.
    ======================================================================== */
 
--- ------------------------------------------------------------------------
--- usp_GetClientSensitiveData
---
--- Returns decrypted client PII for ONE client at a time. Deliberately not
--- a view and deliberately not bulk: a caller must name the ClientID they
--- have a business reason to look at, and every call is captured by the
--- Database Audit Specification on dbo.Clients.
--- ------------------------------------------------------------------------
+-- usp_GetClientSensitiveData: Returns decrypted client PII for ONE client at a
+-- time.
 CREATE OR ALTER PROCEDURE dbo.usp_GetClientSensitiveData
     @ClientID INT,
     @Reason   NVARCHAR(200) = NULL   -- purpose-of-access, written to AuditLog
@@ -2225,7 +1987,6 @@ BEGIN
     END;
 
     -- Record WHO asked for decrypted PII and WHY, before handing it over.
-    -- ORIGINAL_LOGIN() survives EXECUTE AS OWNER, so this names the human.
     INSERT INTO dbo.AuditLog
         (TableName, OperationType, RecordID, ChangedBy,
          NewValues, ApplicationName, HostName)
@@ -2256,12 +2017,8 @@ END;
 GO
 
 
-
--- ------------------------------------------------------------------------
--- usp_GetLeaseDocumentPath
---
--- Same pattern for the encrypted lease-document location.
--- ------------------------------------------------------------------------
+-- usp_GetLeaseDocumentPath: Same pattern for the encrypted lease-document
+-- location.
 CREATE OR ALTER PROCEDURE dbo.usp_GetLeaseDocumentPath
     @LeaseID INT
 WITH EXECUTE AS OWNER
@@ -2293,15 +2050,8 @@ END;
 GO
 
 
-
--- ------------------------------------------------------------------------
--- usp_EncryptClientPII
---
--- Re-encrypts the sensitive columns for a client after an INSERT/UPDATE.
--- Without this, any row created through usp_ManageClient after the initial
--- build would have plain values but EMPTY ciphertext columns, and the
--- encryption would silently stop covering new data.
--- ------------------------------------------------------------------------
+-- usp_EncryptClientPII: Re-encrypts the sensitive columns for a client after an
+-- INSERT/UPDATE.
 CREATE OR ALTER PROCEDURE dbo.usp_EncryptClientPII
     @ClientID INT = NULL       -- NULL = refresh every row that needs it
 WITH EXECUTE AS OWNER
@@ -2340,16 +2090,8 @@ END;
 GO
 
 
-
--- ------------------------------------------------------------------------
--- Who may decrypt?
---
--- role_Admin  - business owners of client data, needed for daily service.
--- role_DBA    - needed for data-recovery and key-rotation duties.
--- Everyone else (PropMgmtDev, ClientPortalDev, Analyst, ReadOnly) has NO
--- route to plaintext at all: they were never granted EXECUTE, and the
--- ciphertext columns are meaningless without the key.
--- ------------------------------------------------------------------------
+-- Who may decrypt? role_Admin - business owners of client data, needed for
+-- daily service.
 GRANT EXECUTE ON dbo.usp_GetClientSensitiveData TO role_Admin;
 GRANT EXECUTE ON dbo.usp_GetClientSensitiveData TO role_DBA;
 GRANT EXECUTE ON dbo.usp_GetLeaseDocumentPath   TO role_Admin;
@@ -2361,8 +2103,6 @@ GRANT EXECUTE ON dbo.usp_ReportSuspiciousLogins TO role_DBA;
 GO
 
 -- Explicit DENY on the decryption doors for the developer/reporting roles.
--- They have no EXECUTE anyway, but an explicit DENY documents the intent in
--- sys.database_permissions and cannot be undone by a future role grant.
 DENY EXECUTE ON dbo.usp_GetClientSensitiveData TO role_PropMgmtDev;
 DENY EXECUTE ON dbo.usp_GetClientSensitiveData TO role_ClientPortalDev;
 DENY EXECUTE ON dbo.usp_GetClientSensitiveData TO role_Analyst;
@@ -2371,14 +2111,7 @@ DENY EXECUTE ON dbo.usp_GetLeaseDocumentPath   TO role_Analyst;
 DENY EXECUTE ON dbo.usp_GetLeaseDocumentPath   TO role_ReadOnly;
 GO
 
--- ------------------------------------------------------------------------
 -- Ad-hoc key access for DBAs only.
---
--- The procedures above are the normal route. A DBA also needs to be able to
--- open the key directly during a disaster-recovery or key-rotation exercise,
--- which requires VIEW DEFINITION on the key and CONTROL on the certificate
--- that protects it. This is granted to role_DBA and to nobody else.
--- ------------------------------------------------------------------------
 GRANT VIEW DEFINITION ON SYMMETRIC KEY::EMS_ClientDataSymmetricKey TO role_DBA;
 GRANT CONTROL ON CERTIFICATE::EMS_DataProtectionCertificate        TO role_DBA;
 GO
@@ -2387,34 +2120,18 @@ PRINT 'Controlled decryption path created (procedures + grants).';
 GO
 
 
-
 /* ========================================================================
    OPTIONAL HARDENING - REMOVING THE PLAINTEXT DUPLICATES
-
-   Right now each protected column exists TWICE: the readable original
-   (protected by masking) and the ciphertext copy (protected by the key).
-   That is intentional in this submission, because the masking requirement
-   has to be demonstrable on the same tables - but it does mean the
-   encryption is defence-in-depth rather than true encryption-at-rest,
-   since the plain value is still on the data page and still lands in the
-   AuditLog JSON.
-
-   If the requirement is TRUE encryption-at-rest, un-comment the block
-   below. Run it only AFTER the encryption UPDATE above has populated the
-   ciphertext, and note the follow-on work it forces:
-     - vw_ClientDirectory must stop selecting NRIC
-     - usp_ManageClient must call usp_EncryptClientPII instead of writing
-       the plain column
-     - the masking block for Clients.NRIC / LeaseAgreements.AgreementDocPath
-       becomes redundant and should be deleted
-     - test cases B2, C5, C6, C7 must select ContactNumber/Email instead
-       of NRIC
+   Each protected column exists twice (readable + ciphertext) so masking stays
+   demonstrable, which makes the encryption defence-in-depth rather than true
+   encryption-at-rest; un-comment below for the latter, then fix
+   vw_ClientDirectory, usp_ManageClient, the two masking blocks and tests
+   B2/C5/C6/C7. See README.md "Known limitations".
    ------------------------------------------------------------------------
    ALTER TABLE dbo.Clients         DROP COLUMN NRIC;
    ALTER TABLE dbo.LeaseAgreements DROP COLUMN AgreementDocPath;
    GO
    ======================================================================== */
-
 
 
 USE master;
@@ -2425,30 +2142,14 @@ ALTER DATABASE GreenAcresEMS SET RECOVERY FULL;
 GO
 
 -- >>> MOVED TO DML.sql: Key-material backup, database backups, restore rehearsal
---     This file defines structure only. Run DDL.sql first, then DML.sql.
-
 
 
 USE GreenAcresEMS;
 GO
 
--- ------------------------------------------------------------------------
--- PART 12: AUDIT TABLES, RETENTION AND AUDIT PERMISSIONS
--- Green Acres Realty Sdn Bhd - EMS Database Security
--- CT069-3-3 Database Security Assignment
--- Purpose:
---   1. Create the central AuditLog table if it does not exist.
---   2. Create an archive and controlled retention procedure for history.
---   3. Protect audit evidence from normal developer roles.
---   4. Create SQL Server Audit objects for security events.
---   5. Create a Database Audit Specification for GreenAcresEMS.
---   Run this AFTER the database, tables, roles, users and permissions
---   have been created.
---   Before running this script, create this Windows folder manually:
---       C:\SQLAudit\
---   SQL Server must have permission to write into that folder.
---   If CREATE SERVER AUDIT fails, run SSMS as administrator or ask
---   your lecturer/lab admin for sysadmin permission.
+-- PART 12: AUDIT TABLES, RETENTION AND AUDIT PERMISSIONS Green Acres Realty Sdn
+-- Bhd - EMS Database Security CT069-3-3 Database Security Assignment Purpose:
+-- 1. Create the central AuditLog table if it does not exist.
 
 USE GreenAcresEMS;
 GO
@@ -2561,24 +2262,7 @@ BEGIN
 END;
 GO
 
--- ------------------------------------------------------------------------
 -- Only DBA/Admin should read the audit trail directly.
--- Normal developer roles should not be able to change or delete audit
--- evidence.
---
--- CLASSIFY THE AUDIT LOG AS SENSITIVE DATA IN ITS OWN RIGHT.
--- The OldValues / NewValues columns hold a JSON snapshot of the whole
--- changed row, so a client's contact number and address are written into
--- AuditLog in the clear, and Dynamic Data Masking does NOT follow them
--- there - a mask protects Clients.Email, not a JSON string that happens to
--- contain the same characters. AuditLog is therefore at least as sensitive
--- as the tables it watches, and it is deliberately readable only by
--- role_DBA and role_Admin (both of which already hold UNMASK anyway), with
--- an explicit DENY for every other role below.
---
--- The SystemUsers trigger goes further and lists its columns explicitly so
--- that credential material is never copied into the log at all.
--- ------------------------------------------------------------------------
 IF DATABASE_PRINCIPAL_ID('role_DBA') IS NOT NULL
 BEGIN
     GRANT SELECT ON dbo.AuditLog TO role_DBA;
@@ -2626,8 +2310,6 @@ USE GreenAcresEMS;
 GO
 
 -- Drop the database audit specification first if this script is re-run.
--- SQL Server will not allow the server audit to be dropped while a database
--- audit specification is still using it.
 IF EXISTS (SELECT 1 FROM sys.database_audit_specifications WHERE name = 'GA_EMS_DatabaseAuditSpec')
 BEGIN
     ALTER DATABASE AUDIT SPECIFICATION GA_EMS_DatabaseAuditSpec WITH (STATE = OFF);
@@ -2725,37 +2407,13 @@ ALTER DATABASE AUDIT SPECIFICATION GA_EMS_DatabaseAuditSpec WITH (STATE = ON);
 GO
 
 -- >>> MOVED TO DML.sql: Audit status verification queries
---     This file defines structure only. Run DDL.sql first, then DML.sql.
 
 
 /* ========================================================================
    REQUIREMENT 9 & 10 (continued): LOGIN HISTORY IN dbo.UserLoginLog
-
-   The Server Audit above writes to .sqlaudit FILES, which are excellent
-   tamper-resistant evidence but awkward to query from the application and
-   impossible to join to our own SystemUsers table. dbo.UserLoginLog is the
-   in-database companion: queryable, joinable, and reportable.
-
-   Two feeds populate it:
-     a) usp_VerifySystemUserPassword - application-level EMS logins
-        (already wired up in the hashing section above).
-     b) the LOGON trigger below      - real SQL Server connections.
-
-   WHY A LOGON TRIGGER NEEDS CARE:
-   A logon trigger runs for EVERY connection to the instance. If it throws
-   an unhandled error, SQL Server denies the login - including yours - and
-   you are locked out of your own server. This implementation is therefore
-   defensive:
-     * the whole body sits inside TRY/CATCH, and the CATCH block does
-       nothing, so a logging failure can never block a login;
-     * it only writes a row for logins the EMS actually knows about, so it
-       adds no measurable cost to other connections;
-     * it is created WITH EXECUTE AS 'sa' because the connecting principal
-       will not have INSERT permission on GreenAcresEMS.dbo.UserLoginLog.
-
-   IF YOU DO GET LOCKED OUT: start sqlcmd with the -A switch (admin
-   connection), which bypasses logon triggers, then run
-       DISABLE TRIGGER trg_ServerLogon_AuditLogin ON ALL SERVER;
+   The Server Audit above writes to .sqlaudit FILES, which are excellent tamper-
+   resistant evidence but awkward to query from the application and impossible
+   to join to our own SystemUsers table.
    ======================================================================== */
 USE master;
 GO
@@ -2783,9 +2441,8 @@ BEGIN
         BEGIN TRY
             DECLARE @LoginName NVARCHAR(100) = ORIGINAL_LOGIN();
 
-            -- Only log principals that belong to the EMS. Everything else
-            -- (sa, service accounts, the lecturer''s own login) is ignored
-            -- so this trigger stays cheap and quiet.
+            -- Only log principals the EMS knows about; everything else is
+            -- ignored so this trigger stays cheap and quiet.
             IF EXISTS (
                 SELECT 1
                 FROM GreenAcresEMS.dbo.SystemUsers
@@ -2808,10 +2465,8 @@ BEGIN
             END;
         END TRY
         BEGIN CATCH
-            -- Deliberately swallowed. Never block a login because auditing
-            -- failed; the Server Audit file remains the primary evidence.
-            -- (This also keeps logins working while GreenAcresEMS is being
-            -- dropped, restored or taken offline.)
+            -- Swallowed on purpose: never block a login because auditing
+            -- failed, and never while GreenAcresEMS is offline.
             DECLARE @Ignored NVARCHAR(4000) = ERROR_MESSAGE();
         END CATCH;
     END;
@@ -2829,18 +2484,8 @@ GO
 USE GreenAcresEMS;
 GO
 
--- ------------------------------------------------------------------------
--- vw_ServerLoginAudit
---
--- Reads the FAILED and SUCCESSFUL login events straight out of the audit
--- files. A logon trigger cannot see failed logins (the connection is
--- rejected before it fires), so this view is what completes the picture.
---
--- NOTE: sys.fn_get_audit_file requires CONTROL SERVER, so this view is
--- readable by sysadmins only. It is not granted to role_DBA because doing
--- so would not work - the permission is checked at the function, not the
--- view.
--- ------------------------------------------------------------------------
+-- vw_ServerLoginAudit: Reads the FAILED and SUCCESSFUL login events straight
+-- out of the audit files.
 CREATE OR ALTER VIEW dbo.vw_ServerLoginAudit
 AS
     SELECT TOP 1000
@@ -2857,13 +2502,9 @@ AS
     ORDER BY event_time DESC;
 GO
 
--- ------------------------------------------------------------------------
--- vw_LoginHistory
---
--- The in-database login history, joined to the staff record and department
--- so the DBA can answer "who was connected, from where, and when" without
--- opening an audit file.
--- ------------------------------------------------------------------------
+-- vw_LoginHistory: The in-database login history, joined to the staff record
+-- and department so the DBA can answer "who was connected, from where, and
+-- when" without opening an audit file.
 CREATE OR ALTER VIEW dbo.vw_LoginHistory
 AS
     SELECT
@@ -2907,24 +2548,9 @@ GO
 PRINT 'Auditing setup completed. Triggers are created next, then run DML.sql.';
 GO
 
--- ------------------------------------------------------------------------
--- PART 15: TRIGGERS - 8 AUDIT, 4 OPERATIONAL
--- Green Acres Realty Sdn Bhd - EMS Database Security
--- Purpose:
---   Create one set-based history trigger for each important table.
---   Every changed row produces one AuditLog row containing the
---   original login, time, application, host and before/after JSON.
---
---   These are the LAST objects this file creates. DML.sql switches them
---   off for its bulk seed load and back on afterwards - see the note at
---   the top of that file for why.
--- Security note:
---   The SystemUsers trigger lists its columns EXPLICITLY (never i.* / d.*)
---   so that no credential column can ever be copied into the audit log -
---   not the legacy PasswordHash/PasswordSalt, and not the current
---   PasswordHashSecure/PasswordSaltSecure either. An audit trail that
---   contains password material is a credential store with weaker
---   protection than the table it came from.
+-- PART 15: TRIGGERS - 8 AUDIT, 4 OPERATIONAL Green Acres Realty Sdn Bhd - EMS
+-- Database Security Purpose: Create one set-based history trigger for each
+-- important table.
 
 USE GreenAcresEMS;
 GO
@@ -3353,17 +2979,13 @@ END;
 GO
 
 -- >>> MOVED TO DML.sql: Trigger inventory verification query
---     This file defines structure only. Run DDL.sql first, then DML.sql.
 
 PRINT 'Eight row-history audit triggers created successfully.';
 GO
 
 
-
--- B1. New Transaction -> keep Property.Status in sync
---     'Sale' closes the property out as Sold; 'Rent' marks it
---     Rented. Saves every dev team from having to remember to
---     do this manually in application code.
+-- B1. New Transaction -> Property.Status: 'Sale' becomes Sold, 'Rent' becomes
+--     Rented, so no dev team has to remember to do it in application code.
 CREATE OR ALTER TRIGGER trg_Transactions_UpdatePropertyStatus
 ON dbo.Transactions
 AFTER INSERT
@@ -3383,9 +3005,8 @@ BEGIN
 END;
 GO
 
--- B2. New Transaction -> auto-generate the CommissionPayments
---     row using the agent's current CommissionRate (snapshot),
---     so DBAs/finance don't have to insert it separately.
+-- B2. New Transaction -> auto-generate its CommissionPayments row, snapshotting
+--     the agent's current CommissionRate at the time of the sale.
 CREATE OR ALTER TRIGGER trg_Transactions_AutoCommission
 ON dbo.Transactions
 AFTER INSERT
@@ -3408,9 +3029,8 @@ BEGIN
 END;
 GO
 
--- B3. Lease ends (Expired/Terminated) -> free up the Property
---     and notify the client. Only reverts status if no other
---     Active lease exists on the same property.
+-- B3. Lease Expired/Terminated -> free up the Property (only if no other Active
+--     lease holds it) and notify the client.
 CREATE OR ALTER TRIGGER trg_LeaseAgreements_StatusChange
 ON dbo.LeaseAgreements
 AFTER UPDATE
@@ -3421,8 +3041,8 @@ BEGIN
     IF NOT UPDATE(LeaseStatus)
         RETURN;
 
-    -- Free up the property when a lease ends, unless another
-    -- active lease is still keeping it occupied.
+    -- Free up the property when a lease ends, unless another active lease is
+    -- still keeping it occupied.
     UPDATE p
     SET p.Status = 'Available'
     FROM dbo.Properties p
@@ -3451,10 +3071,8 @@ BEGIN
 END;
 GO
 
--- B4. Maintenance request marked Completed -> auto-stamp
---     CompletedDate and notify the requesting client.
---     Direct trigger recursion is off by default in SQL Server,
---     so the self-UPDATE below will not re-fire this trigger.
+-- B4. Maintenance request Completed -> stamp CompletedDate and notify the
+--     client; direct recursion is off by default, so the self-UPDATE is safe.
 CREATE OR ALTER TRIGGER trg_MaintenanceRequests_AutoComplete
 ON dbo.MaintenanceRequests
 AFTER UPDATE

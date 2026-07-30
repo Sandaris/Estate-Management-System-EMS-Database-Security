@@ -33,7 +33,7 @@ GO
    Goal: Prove the audit triggers (log every INSERT/UPDATE/DELETE)
    and the operational triggers (auto-update statuses, auto-create
    commission/notification rows) work correctly.
-   Run AFTER 08_triggers.sql.
+   Run AFTER 09_audit_triggers.sql.
    ================================================================ */
 
 -- ----------------------------------------------------------------

@@ -52,7 +52,7 @@ CREATE TABLE Properties (
     Status          NVARCHAR(50)    NOT NULL        DEFAULT 'Available'
         CONSTRAINT CK_Properties_Status CHECK (Status IN ('Available','Sold','Rented','Under Maintenance','Reserved')),
     IsActive        BIT             NOT NULL        DEFAULT 1,  -- soft-delete flag
-    CreatedDate     DATETIME        NOT NULL        DEFAULT GETDATE(),
+    CreatedDate     DATETIME        NOT NULL        DEFAULT GETDATE()
 );
 GO
 SELECT * FROM Properties
@@ -72,7 +72,7 @@ CREATE TABLE Clients (
     ClientType      NVARCHAR(50)    NOT NULL        DEFAULT 'Individual'
         CONSTRAINT CK_Clients_Type CHECK (ClientType IN ('Individual','Corporate')),
     IsActive        BIT             NOT NULL        DEFAULT 1,
-    RegisteredDate  DATETIME        NOT NULL        DEFAULT GETDATE(),
+    RegisteredDate  DATETIME        NOT NULL        DEFAULT GETDATE()
 );
 GO
 SELECT * FROM Clients
@@ -90,7 +90,7 @@ CREATE TABLE Agents (
     CommissionRate  DECIMAL(5,2)    NOT NULL        DEFAULT 2.50, -- [SENSITIVE]
         CONSTRAINT CK_Agents_CommRate CHECK (CommissionRate BETWEEN 0 AND 100),
     IsActive        BIT             NOT NULL        DEFAULT 1,
-    JoinedDate      DATETIME        NOT NULL        DEFAULT GETDATE(),
+    JoinedDate      DATETIME        NOT NULL        DEFAULT GETDATE()
 );
 GO
 SELECT * FROM Agents
@@ -187,7 +187,7 @@ CREATE TABLE SystemUsers (
             'DBA','PropMgmtDev','ClientPortalDev','Analyst','ReadOnly','Admin'
         )),
     IsActive        BIT             NOT NULL        DEFAULT 1,
-    CreatedDate     DATETIME        NOT NULL        DEFAULT GETDATE(),
+    CreatedDate     DATETIME        NOT NULL        DEFAULT GETDATE()
 );
 GO
 SELECT * FROM SystemUsers
@@ -1231,6 +1231,7 @@ GRANT SELECT ON dbo.Transactions        TO role_Analyst;
 GRANT SELECT ON dbo.MaintenanceRequests TO role_Analyst;
 GRANT SELECT ON dbo.Agents              TO role_Analyst;
 GRANT SELECT ON dbo.Departments         TO role_Analyst;
+GO
 
 
 
@@ -1272,6 +1273,7 @@ AS
 GO
 
 SELECT * FROM vw_PropertyListing;
+GO
 
 ----------------------------------------------------------------
 -- 4.2  Client directory (List of clients and their respective information)
@@ -1291,6 +1293,7 @@ AS
 GO
 
 SELECT * FROM vw_ClientDirectory;
+GO
 
 ----------------------------------------------------------------
 -- 4.3  Active leases (List of properties that still have Active lease status)
@@ -1313,6 +1316,7 @@ AS
 GO
 
 SELECT * FROM vw_ActiveLeases;
+GO
 
 ----------------------------------------------------------------
 -- 4.4  Agent performance (List of Agents with their compiled sales/ performance and their values)
@@ -1334,6 +1338,7 @@ AS
 GO
 
 SELECT * FROM vw_AgentPerformance;
+GO
 
 ----------------------------------------------------------------
 -- 4.5  Monthly sales summary (Revenue summary of rent and sale transactions based on sales year and month - For analytics)
@@ -1355,6 +1360,7 @@ AS
 GO
 
 SELECT * FROM vw_MonthlySalesSummary;
+GO
 
 ----------------------------------------------------------------
 -- 4.6  Maintenance overview (List of properties with Maintenance works and their respective details/progress)
@@ -1376,6 +1382,7 @@ AS
 GO
 
 SELECT * FROM vw_MaintenanceOverview;
+GO
 
 ----------------------------------------------------------------
 -- 4.7  Commission summary (List of Agents and their commission details & history)
@@ -1396,6 +1403,7 @@ AS
 GO
 
 SELECT * FROM vw_CommissionSummary;
+GO
 
 -- ------------------------------------------------------------
 --   4.8  View-Level Permission Grants
@@ -2810,7 +2818,8 @@ WITH
     INIT,                           -- overwrite existing backup sets
     NAME = 'GreenAcresEMS-Full Database Backup',
     DESCRIPTION = 'Weekly full baseline backup of the EMS database',
-    COMPRESSION,                    -- smaller backup file (Standard/Enterprise)
+    -- COMPRESSION,                 -- Standard/Enterprise only; Express raises Msg 1844
+
     CHECKSUM,                       -- detect I/O corruption during backup
     STATS = 10;                     -- progress reported every 10%
 GO
@@ -2831,7 +2840,8 @@ WITH
     INIT,
     NAME = 'GreenAcresEMS-Differential Backup',
     DESCRIPTION = 'Daily differential backup (changes since last full)',
-    COMPRESSION,
+    -- COMPRESSION,                 -- Standard/Enterprise only; Express raises Msg 1844
+
     CHECKSUM,
     STATS = 10;
 GO
@@ -2851,7 +2861,8 @@ WITH
     INIT,
     NAME = 'GreenAcresEMS-Transaction Log Backup',
     DESCRIPTION = 'Hourly transaction log backup for point-in-time recovery',
-    COMPRESSION,
+    -- COMPRESSION,                 -- Standard/Enterprise only; Express raises Msg 1844
+
     CHECKSUM,
     STATS = 10;
 GO
@@ -2941,7 +2952,7 @@ GO
 
 
 /* ============================================================
-   MEMBER 4 - TRIGGERS (08_triggers.sql)
+   MEMBER 4 - TRIGGERS (09_audit_triggers.sql)
    Green Acres Realty Sdn Bhd - EMS Database Security
    CT069-3-3 Database Security Assignment
 
@@ -3174,6 +3185,7 @@ GO
 
 -- ------------------------------------------------------------
 -- A6. SystemUsers
+--     Credential hashes and salts are excluded from audit JSON.
 -- ------------------------------------------------------------
 CREATE OR ALTER TRIGGER trg_SystemUsers_Audit
 ON dbo.SystemUsers
@@ -3187,8 +3199,12 @@ BEGIN
     BEGIN
         INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, OldValues, NewValues, ApplicationName, HostName)
         SELECT 'SystemUsers', 'UPDATE', CAST(i.SystemUserID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
-               (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
-               (SELECT i.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               (SELECT d.SystemUserID, d.DepartmentID, d.FullName, d.LoginName,
+                       d.Email, d.UserRole, d.IsActive, d.CreatedDate
+                FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               (SELECT i.SystemUserID, i.DepartmentID, i.FullName, i.LoginName,
+                       i.Email, i.UserRole, i.IsActive, i.CreatedDate
+                FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
                APP_NAME(), HOST_NAME()
         FROM inserted i
         JOIN deleted d ON d.SystemUserID = i.SystemUserID;
@@ -3197,7 +3213,9 @@ BEGIN
     BEGIN
         INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, NewValues, ApplicationName, HostName)
         SELECT 'SystemUsers', 'INSERT', CAST(i.SystemUserID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
-               (SELECT i.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               (SELECT i.SystemUserID, i.DepartmentID, i.FullName, i.LoginName,
+                       i.Email, i.UserRole, i.IsActive, i.CreatedDate
+                FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
                APP_NAME(), HOST_NAME()
         FROM inserted i;
     END
@@ -3205,7 +3223,9 @@ BEGIN
     BEGIN
         INSERT INTO dbo.AuditLog (TableName, OperationType, RecordID, ChangedBy, OldValues, ApplicationName, HostName)
         SELECT 'SystemUsers', 'DELETE', CAST(d.SystemUserID AS NVARCHAR(50)), ORIGINAL_LOGIN(),
-               (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+               (SELECT d.SystemUserID, d.DepartmentID, d.FullName, d.LoginName,
+                       d.Email, d.UserRole, d.IsActive, d.CreatedDate
+                FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
                APP_NAME(), HOST_NAME()
         FROM deleted d;
     END

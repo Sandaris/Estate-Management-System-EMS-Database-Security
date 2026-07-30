@@ -327,7 +327,7 @@ A backup is useless if it is never tested. The restore process should also be te
 
 ## Repository Structure
 
-The recommended repository structure is:
+An expanded submission repository could be organised as:
 
 ```text
 .
@@ -341,9 +341,9 @@ The recommended repository structure is:
 │   ├── 06_create_roles_users_permissions.sql
 │   ├── 07_data_protection.sql
 │   ├── 08_auditing.sql
-│   ├── 09_triggers.sql
+│   ├── 09_audit_triggers.sql
 │   ├── 10_backup_restore.sql
-│   └── 99_full_implementation.sql
+│   └── Compiled SQL file.sql
 │
 ├── test-cases/
 │   └── DBS_TestCases_<group_number>.docx
@@ -357,6 +357,9 @@ The recommended repository structure is:
 └── submission/
     └── Implementation_<group_number>.zip
 ```
+
+The files in the current working folder are intentionally not split into all
+of those subdirectories. Use the actual run sequence below.
 
 ---
 
@@ -377,28 +380,36 @@ Before running the project, make sure you have:
 
 ### Setup Steps
 
-Run the SQL scripts in the following order:
+For the current repository, run these files in SQL Server Management Studio
+using a sysadmin/DBA account:
 
 ```text
-01_create_database.sql
-02_create_tables.sql
-03_insert_sample_data.sql
-04_create_views.sql
-05_create_stored_procedures.sql
-06_create_roles_users_permissions.sql
-07_data_protection.sql
+Compiled SQL file.sql
 08_auditing.sql
-09_triggers.sql
-10_backup_restore.sql
+09_audit_triggers.sql
+auditing_testcases.sql
 ```
 
-Alternatively, run:
+**Warning:** `Compiled SQL file.sql` drops and recreates `GreenAcresEMS`.
+Back up any database work or screenshots that must be retained before running
+it, and do not run it against a production database.
+
+The first file creates the complete database, data, roles and the other group
+features. `08_auditing.sql` creates the audit tables, retention procedure,
+access controls and SQL Server Audit specifications. `09_audit_triggers.sql`
+creates or refreshes the eight row-history triggers. The final file produces
+the result grids needed for screenshots.
+
+Before running `08_auditing.sql`, create this folder and grant the SQL Server
+service account write permission to it:
 
 ```text
-99_full_implementation.sql
+C:\SQLAudit\
 ```
 
-Only use the full implementation script if it has already been tested from a clean database state.
+`00_BEGINNER_COPY_PASTE_FULL_SETUP.sql` is a smaller standalone teaching
+demonstration. It uses a reduced schema and different role names, so it must
+not be used as evidence for the full audit matrix in the final report.
 
 ---
 

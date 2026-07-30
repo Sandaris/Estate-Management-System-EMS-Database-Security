@@ -1,13 +1,6 @@
 /* ========================================================================
    Compiled_code.sql - Green Acres Realty Sdn Bhd, EMS
-   CT069-3-3 Database Security Assignment
-
-   The complete build in one script, in dependency order - run it top to
-   bottom, once, as sysadmin. Identical SQL to DDL.sql + DML.sql, which are
-   the same build split into structure and data; keep the two layouts in
-   step if you edit either.
-
-   Test cases are in test_cases.sql - run this file first, then that one.
+  
 
    ORDER
       1  database                      11  password salts and hashes
@@ -29,15 +22,13 @@
        instead of encrypting the mask "XXXXXX1234";
      - backups (18) run last, so the .bak holds the finished database -
        every table, key, audit object and trigger already exists.
-
-   See README.md for the design discussion.
    ======================================================================== */
 
 
 USE master;
 GO
 
--- Remove the logon trigger from any previous run FIRST.
+
 IF EXISTS (SELECT 1 FROM sys.server_triggers WHERE name = 'trg_ServerLogon_AuditLogin')
 BEGIN
     DROP TRIGGER trg_ServerLogon_AuditLogin ON ALL SERVER;
@@ -66,8 +57,7 @@ USE GreenAcresEMS;
 GO
 
 
--- Enhanced: added PropertyType, Bedrooms, Bathrooms, Sizesqft, IsActive for
--- richer operational data.
+
 
 /* ========================================================================
    REQUIREMENT 12: ADD NEW TABLE OR EDIT EXISTING TABLE

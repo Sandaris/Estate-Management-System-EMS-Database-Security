@@ -2008,6 +2008,15 @@ BEGIN
 END;
 GO
 
+-- Forced-reset flag: 1 = still on the onboarding password. Added here, before
+-- Part 11, because Part 11's proof query reads this column.
+IF COL_LENGTH('dbo.SystemUsers', 'PasswordMustChange') IS NULL
+BEGIN
+    ALTER TABLE dbo.SystemUsers
+    ADD PasswordMustChange BIT NOT NULL CONSTRAINT DF_SysUser_MustChange DEFAULT 1;
+END;
+GO
+
 
 /* ========================================================================
    PART 11: PASSWORD SALTS AND SHA2_512 HASHES
@@ -2020,7 +2029,7 @@ GO
 
 
 -- Every account is seeded with the SAME temporary password and is expected to
--- change it at first login (the PasswordMustChange column, added by DDL.sql, is
+-- change it at first login (the PasswordMustChange column, added above, is
 -- what enforces this).
 UPDATE dbo.SystemUsers
 SET
@@ -2042,15 +2051,6 @@ SELECT
     MIN(DATALENGTH(PasswordHashSecure)) AS HashBytes,
     SUM(CASE WHEN PasswordMustChange = 1 THEN 1 ELSE 0 END) AS AwaitingFirstReset
 FROM dbo.SystemUsers;
-GO
-
-
--- Forced-reset flag: 1 = still on the onboarding password.
-IF COL_LENGTH('dbo.SystemUsers', 'PasswordMustChange') IS NULL
-BEGIN
-    ALTER TABLE dbo.SystemUsers
-    ADD PasswordMustChange BIT NOT NULL CONSTRAINT DF_SysUser_MustChange DEFAULT 1;
-END;
 GO
 
 
@@ -2987,6 +2987,12 @@ BEGIN
     ALTER SERVER AUDIT GA_EMS_ServerAudit WITH (STATE = OFF);
     DROP SERVER AUDIT GA_EMS_ServerAudit;
 END;
+GO
+
+-- Created via the SQL Server service account, so the folder already has the
+-- permissions CREATE SERVER AUDIT needs - a manually created folder often
+-- does not, which is why this step used to fail silently downstream.
+EXEC master.dbo.xp_create_subdir 'C:\SQLAudit';
 GO
 
 

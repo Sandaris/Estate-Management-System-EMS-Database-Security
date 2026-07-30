@@ -12,27 +12,13 @@ The original developer script (Appendix I of the brief) is five bare tables with
 
 ## Files
 
-The same build is provided in **two layouts**. Pick one — they contain identical SQL.
-
-**Split layout** (recommended for marking, since DDL and DML are separated):
-
 | File | Lines | What it is |
 |---|---|---|
-| **`DDL.sql`** | 3,107 | **Structure only.** Every `CREATE`/`ALTER`, plus the whole permission model. Loads no data. |
-| **`DML.sql`** | 2,622 | **Data, operations and tests.** Seed load, encryption/hashing, backups, restore rehearsal, and all 77 test cases. |
+| **`Compiled_code.sql`** | 4,156 | The whole build, in dependency order — 19 numbered parts, run top to bottom. |
+| **`test_cases.sql`** | 1,523 | The 77 test cases, run after the build. |
+| `DBS Assignment Question.pdf` | — | The assignment brief. |
 
-**Single-file layout:**
-
-| File | Lines | What it is |
-|---|---|---|
-| `Compiled_code.sql` | 4,160 | The whole build in one script, in dependency order — 19 numbered parts. |
-| `test_cases.sql` | 1,523 | The 77 test cases on their own. Same content as `DML.sql` Section 7. |
-
-`DBS Assignment Question.pdf` is the assignment brief.
-
-Both layouts contain the same SQL, but the single-file version is **ordered differently on purpose**: because it creates the triggers near the end, the seed data loads before any trigger exists, so it needs none of the disable/enable steps that `DML.sql` Section 1 requires. It also applies masking *after* encryption, and takes the backups last. That accounts for the small line-count difference.
-
-**If you edit one layout, mirror the change in the other** — nothing keeps them in step automatically.
+`Compiled_code.sql` builds the database in one forward pass, so nothing later in the file depends on something earlier being undone or redone: tables, then seed data (before any trigger exists, so the load fires nothing), then roles/users/permissions, then views and procedures, then the encrypted and hashed columns (encryption before masking, so it reads real values rather than the mask), then the audit objects and triggers, then backups last, once everything they'd capture already exists.
 
 ---
 
@@ -42,30 +28,16 @@ Both layouts contain the same SQL, but the single-file version is **ordered diff
 
 1. **SQL Server 2019 or later** (2022+ unlocks column-level `UNMASK` — see [Known limitations](#known-limitations)). Developer, Enterprise or Standard edition; Express has no backup compression, so drop that option from the `BACKUP` statements if you must use it.
 2. **Connect as `sysadmin`.** Non-negotiable, for four reasons: `CREATE SERVER AUDIT` and the `LOGON` trigger are server-scoped; `xp_create_subdir` needs it; and the encryption step reads plaintext through Dynamic Data Masking, which only an `UNMASK`-holding principal can do. Run it as a masked user and you will encrypt the string `XXXXXX1234`.
-3. **Create these folders** and give the SQL Server service account write access:
-   - `C:\SQLAudit\` — audit files
-   - `C:\EMS_Backups\` — database backups
-   - `C:\EMS_Backups\Keys\` — certificate and key exports (the script creates this one, but check it exists)
+3. **Folders.** The script creates `C:\SQLAudit\`, `C:\EMS_Backups\` and `C:\EMS_Backups\Keys\` itself, via `xp_create_subdir` run as sysadmin — that's deliberate: a folder created this way, by the SQL Server service account, already has the write permission `CREATE SERVER AUDIT` and `BACKUP` need. A folder you create by hand in Explorer often does not, and the audit creation then fails with `Msg 33072: The audit log file path is invalid` while everything after it silently continues. If you'd rather create the folders yourself first, that's fine too — just make sure the service account has write access.
 
 ### Order
-
-Split layout:
-
-```
-1.  DDL.sql     -- builds the empty, secured structure
-2.  DML.sql     -- loads data, protects it, backs it up, then runs all 77 tests
-```
-
-Single-file layout:
 
 ```
 1.  Compiled_code.sql   -- the whole build, 19 parts, run top to bottom
 2.  test_cases.sql      -- the 77 test cases
 ```
 
-`DDL.sql` **drops and recreates** the `GreenAcresEMS` database at the top. Running it again wipes the data, so `DML.sql` must be re-run after it. Both files are otherwise safely re-runnable — object creation is guarded, and leftover logins from a previous run are cleaned up.
-
-`DML.sql` is written to run top to bottom in one go, but it is split into seven clearly headed sections if you would rather step through it — load the data, then protect it, then back it up, then test.
+`Compiled_code.sql` **drops and recreates** the `GreenAcresEMS` database at the top. Running it again wipes the data, so re-run `test_cases.sql` afterwards too. The file is otherwise safely re-runnable — object creation is guarded, and leftover logins from a previous run are cleaned up.
 
 ### If you get locked out
 
@@ -79,24 +51,24 @@ DISABLE TRIGGER trg_ServerLogon_AuditLogin ON ALL SERVER;
 
 ## Where each requirement is implemented
 
-The brief lists twelve techniques. All twelve are implemented. Line numbers are the definition of each object; the data or operation that goes with it is in `DML.sql`.
+The brief lists twelve techniques. All twelve are implemented. Line numbers are in `Compiled_code.sql`.
 
-| # | Requirement | What was built | Defined in | Data / operation in |
-|---|---|---|---|---|
-| 1 | View | 9 views — 7 business + 2 login-audit | `DDL.sql` 562, 2489 | — |
-| 2 | Stored Procedure | 20 procedures | `DDL.sql` 729, 1777, 1969 | — |
-| 3 | Role | 6 roles | `DDL.sql` 346 | — |
-| 4 | User | 12 named logins + users + memberships | `DDL.sql` 356 | — |
-| 5 | Hash | SHA2_512 over a 32-byte `CRYPT_GEN_RANDOM` salt, per account | `DDL.sql` 1708 | `DML.sql` §3 (661) |
-| 6 | Encryption | Master key → certificate → AES-256 symmetric key; 5 encrypted columns; controlled decryption procedures | `DDL.sql` 1633, 1969 | `DML.sql` §2 (586) |
-| 7 | Masking | 19 masked columns across 9 tables | `DDL.sql` 1294 | — |
-| 8 | Backups | Full, differential, log, copy-only + **certificate and master-key export** + restore rehearsal + point-in-time procedure | — | `DML.sql` §5 (743) |
-| 9 | Server auditing | `GA_EMS_ServerAudit` + spec, 6 action groups | `DDL.sql` 2341 | `DML.sql` §6 (1039) |
-| 10 | Database auditing | `GA_EMS_DatabaseAuditSpec`, 5 groups + 16 object-level actions | `DDL.sql` 2380 | `DML.sql` §6 (1039) |
-| 11 | Trigger | 13 — 8 audit (2566), 4 operational (2989), 1 server `LOGON` (2433) | `DDL.sql` | `DML.sql` §1/§4 (trigger toggling around the load) |
-| 12 | New/edited tables | 5 originals extended + 9 new tables | `DDL.sql` 52 | `DML.sql` §1 (25) |
+| # | Requirement | What was built | Line |
+|---|---|---|---|
+| 1 | View | 9 views — 7 business + 2 login-audit | 1114, 3148 |
+| 2 | Stored Procedure | 20 procedures | 1281, 2086, 2626 |
+| 3 | Role | 6 roles | 898 |
+| 4 | User | 12 named logins + users + memberships | 908 |
+| 5 | Hash | SHA2_512 over a 32-byte `CRYPT_GEN_RANDOM` salt, per account | 1983 (columns), 2022 (load) |
+| 6 | Encryption | Master key → certificate → AES-256 symmetric key; 5 encrypted columns; controlled decryption procedures | 1839 (keys), 1909 (load), 2626 (decryption) |
+| 7 | Masking | 19 masked columns across 9 tables | 2271 |
+| 8 | Backups | Full, differential, log, copy-only + **certificate and master-key export** + restore rehearsal + point-in-time procedure | 3769 |
+| 9 | Server auditing | `GA_EMS_ServerAudit` + spec, 6 action groups | 3002 |
+| 10 | Database auditing | `GA_EMS_DatabaseAuditSpec`, 5 groups + 16 object-level actions | 3041 |
+| 11 | Trigger | 13 — 8 audit (3225), 4 operational (3647), 1 server `LOGON` (3092) | — |
+| 12 | New/edited tables | 5 originals extended + 9 new tables | 65 (structure), 303 (seed data) |
 
-Permissions are not a numbered requirement but carry a large share of Section 2's marks: `DDL.sql` line 495 onwards for the database-, table-, view- and procedure-level `GRANT`/`DENY`.
+Permissions are not a numbered requirement but carry a large share of Section 2's marks: line 1047 onwards for the database-, table-, view- and procedure-level `GRANT`/`DENY`.
 
 ---
 
@@ -126,7 +98,7 @@ Permissions are not a numbered requirement but carry a large share of Section 2'
 
 ## Roles and users
 
-Six roles, twelve named accounts, two per role. Every person gets their **own** login with a **unique** password, so `ORIGINAL_LOGIN()` in the audit triggers can always name a single human. Passwords are in `DDL.sql` from line 356.
+Six roles, twelve named accounts, two per role. Every person gets their **own** login with a **unique** password, so `ORIGINAL_LOGIN()` in the audit triggers can always name a single human. Passwords are in `Compiled_code.sql` from line 908.
 
 | Role | Members | Scope |
 |---|---|---|
@@ -139,7 +111,7 @@ Six roles, twelve named accounts, two per role. Every person gets their **own** 
 
 `role_Admin` deliberately **cannot** run `usp_ProvisionUser`. Creating a login is a server-level act, and a business admin who could mint accounts could mint one in `role_DBA` and escalate. Test C19 proves the denial.
 
-`DML.sql` Section 6 dumps the live permission matrix straight from `sys.database_permissions` — use that output for the Authorization Matrix in the report rather than transcribing by hand.
+`test_cases.sql` test C20 dumps the live permission matrix straight from `sys.database_permissions` — use that output for the Authorization Matrix in the report rather than transcribing by hand.
 
 ---
 
@@ -164,7 +136,7 @@ Each control is one layer, never the whole answer:
 
 ## Test suite — 77 cases
 
-All in `test_cases.sql`, and identically in `DML.sql` Section 7 (line 1116 onwards). Each case states its expected result in a comment above it; permission tests print `PASS`/`FAIL`.
+All in `test_cases.sql`. Each case states its expected result in a comment above it; permission tests print `PASS`/`FAIL`.
 
 | Block | Cases | Covers |
 |---|---|---|
@@ -185,7 +157,7 @@ Stated deliberately — each one is a defensible design decision, not an oversig
 
 **Column-level `UNMASK` requires SQL Server 2022.** On 2019 the only alternative is database-wide `UNMASK`, which would also expose PII, so on 2019 nothing is granted and the aggregate limitation is accepted instead. The version check runs through `sp_executesql` so a 2019 parser never sees the 2022 syntax.
 
-**Plaintext columns still sit beside their encrypted copies.** `Clients.NRIC` and `LeaseAgreements.AgreementDocPath` exist in both forms, because the masking requirement has to be demonstrable on the same tables. This makes the encryption defence-in-depth rather than true encryption-at-rest — the plain value is still on the data page. A ready-to-uncomment `DROP COLUMN` block sits at the end of `DDL.sql` §9 along with the exact follow-on edits it forces (view, procedure, masking block, and tests B2/C5/C6/C7). Enable it if true encryption-at-rest is required.
+**Plaintext columns still sit beside their encrypted copies.** `Clients.NRIC` and `LeaseAgreements.AgreementDocPath` exist in both forms, because the masking requirement has to be demonstrable on the same tables. This makes the encryption defence-in-depth rather than true encryption-at-rest — the plain value is still on the data page. A ready-to-uncomment `DROP COLUMN` block sits in `Compiled_code.sql` at line 2781 along with the exact follow-on edits it forces (view, procedure, masking block, and tests B2/C5/C6/C7). Enable it if true encryption-at-rest is required.
 
 **Passwords are in the script in clear text.** Unavoidable for a build script that has to be handed in and re-run by a marker. In production these would come from a secrets vault at run time, or the logins would be Windows/Entra ID authenticated. The same applies to the master-key and certificate-export passwords.
 
@@ -203,4 +175,4 @@ The brief asks for more than SQL. Not in this repository yet:
 - **`DBS_TestCases_<group number>.docx`** — the test cases with **documented outcomes**. `test_cases.sql` states the expected result for every case but records no actual ones; run it and capture what you actually get.
 - **Demo video** — 5 to 15 minutes, presented as though to a real client. Captions optional; English subtitles required if narrated.
 
-For the report, three things are easier to generate than to write by hand: the permission matrix (`DML.sql` Section 6), the masked-column list (test B1), and the object inventory (end of Section 6).
+For the report, three things are easier to generate than to write by hand: the permission matrix (`test_cases.sql` test C20), the masked-column list (test B1), and the object inventory (`Compiled_code.sql` line 4125).

@@ -3783,6 +3783,17 @@ GO
 EXEC master.dbo.xp_create_subdir 'C:\EMS_Backups\Keys';
 GO
 
+-- Clear out key material left over from an earlier run. Every run generates a
+-- fresh certificate and key pair, and unlike BACKUP DATABASE (which takes
+-- INIT/FORMAT), BACKUP CERTIFICATE and BACKUP MASTER KEY simply refuse to
+-- overwrite an existing file (Msg 15240) - so without this, a stale file from
+-- a previous run both blocks this step and, if left in place unnoticed, would
+-- be the WRONG key material for the database rebuilt today.
+EXEC master.dbo.xp_delete_file 0, N'C:\EMS_Backups\Keys\', N'cer', GETDATE();
+EXEC master.dbo.xp_delete_file 0, N'C:\EMS_Backups\Keys\', N'pvk', GETDATE();
+EXEC master.dbo.xp_delete_file 0, N'C:\EMS_Backups\Keys\', N'key', GETDATE();
+GO
+
 
 /* ========================================================================
    REQUIREMENT 8 (part 1): BACKING UP THE KEY MATERIAL

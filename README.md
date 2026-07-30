@@ -14,7 +14,7 @@ The original developer script (Appendix I of the brief) is five bare tables with
 
 | File | Lines | What it is |
 |---|---|---|
-| **`Compiled_code.sql`** | 4,156 | The whole build, in dependency order — 19 numbered parts, run top to bottom. |
+| **`Compiled_code.sql`** | 4,167 | The whole build, in dependency order — 19 numbered parts, run top to bottom. |
 | **`test_cases.sql`** | 1,523 | The 77 test cases, run after the build. |
 | `DBS Assignment Question.pdf` | — | The assignment brief. |
 
@@ -37,7 +37,7 @@ The original developer script (Appendix I of the brief) is five bare tables with
 2.  test_cases.sql      -- the 77 test cases
 ```
 
-`Compiled_code.sql` **drops and recreates** the `GreenAcresEMS` database at the top. Running it again wipes the data, so re-run `test_cases.sql` afterwards too. The file is otherwise safely re-runnable — object creation is guarded, and leftover logins from a previous run are cleaned up.
+`Compiled_code.sql` **drops and recreates** the `GreenAcresEMS` database at the top. Running it again wipes the data, so re-run `test_cases.sql` afterwards too. The file is otherwise safely re-runnable — object creation is guarded, leftover logins from a previous run are cleaned up, and the key-material files (`.cer`/`.pvk`/`.key`) are deleted and re-exported each time, since `BACKUP CERTIFICATE`/`BACKUP MASTER KEY` refuse to overwrite an existing file and each run generates a genuinely new key pair anyway.
 
 ### If you get locked out
 

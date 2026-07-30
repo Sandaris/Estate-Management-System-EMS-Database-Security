@@ -12,15 +12,25 @@ The original developer script (Appendix I of the brief) is five bare tables with
 
 ## Files
 
+The same build is provided in **two layouts**. Pick one — they contain identical SQL.
+
+**Split layout** (recommended for marking, since DDL and DML are separated):
+
 | File | Lines | What it is |
 |---|---|---|
 | **`DDL.sql`** | 3,107 | **Structure only.** Every `CREATE`/`ALTER`, plus the whole permission model. Loads no data. |
 | **`DML.sql`** | 2,622 | **Data, operations and tests.** Seed load, encryption/hashing, backups, restore rehearsal, and all 77 test cases. |
-| `DBS Assignment Question.pdf` | — | The assignment brief. |
 
-Two files, run in order. Between them they build the complete database and then prove it works.
+**Single-file layout:**
 
-An earlier single-file version (`Compiled_code.sql`) and a standalone copy of the tests (`test_cases.sql`) were removed once everything they contained had been carried into these two files. They remain in the Git history if ever needed.
+| File | Lines | What it is |
+|---|---|---|
+| `Compiled_code.sql` | 4,219 | The whole build in one script — Part A structure, Part B data and operations. |
+| `test_cases.sql` | 1,523 | The 77 test cases on their own. Same content as `DML.sql` Section 7. |
+
+`DBS Assignment Question.pdf` is the assignment brief.
+
+Verified equivalent: `Compiled_code.sql` + `test_cases.sql` and `DDL.sql` + `DML.sql` contain exactly the same 4,280 executable lines. **If you edit one layout, mirror the change in the other** — nothing keeps them in step automatically.
 
 ---
 
@@ -37,9 +47,18 @@ An earlier single-file version (`Compiled_code.sql`) and a standalone copy of th
 
 ### Order
 
+Split layout:
+
 ```
 1.  DDL.sql     -- builds the empty, secured structure
 2.  DML.sql     -- loads data, protects it, backs it up, then runs all 77 tests
+```
+
+Single-file layout:
+
+```
+1.  Compiled_code.sql   -- Part A structure, then Part B data and operations
+2.  test_cases.sql      -- the 77 test cases
 ```
 
 `DDL.sql` **drops and recreates** the `GreenAcresEMS` database at the top. Running it again wipes the data, so `DML.sql` must be re-run after it. Both files are otherwise safely re-runnable — object creation is guarded, and leftover logins from a previous run are cleaned up.
@@ -143,7 +162,7 @@ Each control is one layer, never the whole answer:
 
 ## Test suite — 77 cases
 
-All in `DML.sql` Section 7 (line 1116 onwards). Each case states its expected result in a comment above it; permission tests print `PASS`/`FAIL`.
+All in `test_cases.sql`, and identically in `DML.sql` Section 7 (line 1116 onwards). Each case states its expected result in a comment above it; permission tests print `PASS`/`FAIL`.
 
 | Block | Cases | Covers |
 |---|---|---|
@@ -179,7 +198,7 @@ Stated deliberately — each one is a defensible design decision, not an oversig
 The brief asks for more than SQL. Not in this repository yet:
 
 - **`Report_<group number>.pdf`** — introduction and data dictionary, Authorization Matrix, Data Classification Matrix, Database Security Audit Matrix, summary, references
-- **`DBS_TestCases_<group number>.docx`** — the test cases with **documented outcomes**. `DML.sql` Section 7 states the expected result for every case but records no actual ones; run it and capture what you actually get.
+- **`DBS_TestCases_<group number>.docx`** — the test cases with **documented outcomes**. `test_cases.sql` states the expected result for every case but records no actual ones; run it and capture what you actually get.
 - **Demo video** — 5 to 15 minutes, presented as though to a real client. Captions optional; English subtitles required if narrated.
 
 For the report, three things are easier to generate than to write by hand: the permission matrix (`DML.sql` Section 6), the masked-column list (test B1), and the object inventory (end of Section 6).

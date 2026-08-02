@@ -3098,6 +3098,8 @@ GO
 IF EXISTS (SELECT 1 FROM sys.server_principals WHERE name = 'sa' AND type = 'S')
 BEGIN
     EXEC('
+    -- TRIGGER: trg_ServerLogon_AuditLogin
+    -- Records every successful server login by an EMS-known account into dbo.UserLoginLog.
     CREATE TRIGGER trg_ServerLogon_AuditLogin
     ON ALL SERVER
     WITH EXECUTE AS ''sa''
@@ -3231,6 +3233,8 @@ GO
 /* ========================================================================
    REQUIREMENT 11: TRIGGER (AUDITING & OPERATIONAL)
    ======================================================================== */
+-- TRIGGER: trg_Clients_Audit
+-- Writes an AuditLog row (before/after JSON) for every INSERT, UPDATE and DELETE on dbo.Clients.
 CREATE OR ALTER TRIGGER dbo.trg_Clients_Audit
 ON dbo.Clients
 WITH EXECUTE AS OWNER
@@ -3280,6 +3284,8 @@ BEGIN
 END;
 GO
 
+-- TRIGGER: trg_Agents_Audit
+-- Writes an AuditLog row (before/after JSON) for every INSERT, UPDATE and DELETE on dbo.Agents.
 CREATE OR ALTER TRIGGER dbo.trg_Agents_Audit
 ON dbo.Agents
 WITH EXECUTE AS OWNER
@@ -3329,6 +3335,8 @@ BEGIN
 END;
 GO
 
+-- TRIGGER: trg_Transactions_Audit
+-- Writes an AuditLog row (before/after JSON) for every INSERT, UPDATE and DELETE on dbo.Transactions.
 CREATE OR ALTER TRIGGER dbo.trg_Transactions_Audit
 ON dbo.Transactions
 WITH EXECUTE AS OWNER
@@ -3378,6 +3386,8 @@ BEGIN
 END;
 GO
 
+-- TRIGGER: trg_LeaseAgreements_Audit
+-- Writes an AuditLog row (before/after JSON) for every INSERT, UPDATE and DELETE on dbo.LeaseAgreements.
 CREATE OR ALTER TRIGGER dbo.trg_LeaseAgreements_Audit
 ON dbo.LeaseAgreements
 WITH EXECUTE AS OWNER
@@ -3427,6 +3437,8 @@ BEGIN
 END;
 GO
 
+-- TRIGGER: trg_CommissionPayments_Audit
+-- Writes an AuditLog row (before/after JSON) for every INSERT, UPDATE and DELETE on dbo.CommissionPayments.
 CREATE OR ALTER TRIGGER dbo.trg_CommissionPayments_Audit
 ON dbo.CommissionPayments
 WITH EXECUTE AS OWNER
@@ -3476,6 +3488,8 @@ BEGIN
 END;
 GO
 
+-- TRIGGER: trg_SystemUsers_Audit
+-- Writes an AuditLog row for every INSERT, UPDATE and DELETE on dbo.SystemUsers, via an explicit column list.
 -- Columns are listed one by one on purpose: every credential column
 -- (PasswordHashSecure, PasswordSaltSecure, PasswordHashAlgorithm) is
 -- deliberately excluded so hashes and salts never reach dbo.AuditLog.
@@ -3548,6 +3562,8 @@ BEGIN
 END;
 GO
 
+-- TRIGGER: trg_MaintenanceRequests_Audit
+-- Writes an AuditLog row (before/after JSON) for every INSERT, UPDATE and DELETE on dbo.MaintenanceRequests.
 CREATE OR ALTER TRIGGER dbo.trg_MaintenanceRequests_Audit
 ON dbo.MaintenanceRequests
 WITH EXECUTE AS OWNER
@@ -3597,6 +3613,8 @@ BEGIN
 END;
 GO
 
+-- TRIGGER: trg_Properties_Audit
+-- Writes an AuditLog row (before/after JSON) for every INSERT, UPDATE and DELETE on dbo.Properties.
 CREATE OR ALTER TRIGGER dbo.trg_Properties_Audit
 ON dbo.Properties
 WITH EXECUTE AS OWNER
@@ -3651,6 +3669,7 @@ PRINT 'Eight row-history audit triggers created successfully.';
 GO
 
 
+-- TRIGGER: trg_Transactions_UpdatePropertyStatus
 -- B1. New Transaction -> Property.Status: 'Sale' becomes Sold, 'Rent' becomes
 --     Rented, so no dev team has to remember to do it in application code.
 CREATE OR ALTER TRIGGER trg_Transactions_UpdatePropertyStatus
@@ -3672,6 +3691,7 @@ BEGIN
 END;
 GO
 
+-- TRIGGER: trg_Transactions_AutoCommission
 -- B2. New Transaction -> auto-generate its CommissionPayments row, snapshotting
 --     the agent's current CommissionRate at the time of the sale.
 CREATE OR ALTER TRIGGER trg_Transactions_AutoCommission
@@ -3696,6 +3716,7 @@ BEGIN
 END;
 GO
 
+-- TRIGGER: trg_LeaseAgreements_StatusChange
 -- B3. Lease Expired/Terminated -> free up the Property (only if no other Active
 --     lease holds it) and notify the client.
 CREATE OR ALTER TRIGGER trg_LeaseAgreements_StatusChange
@@ -3738,6 +3759,7 @@ BEGIN
 END;
 GO
 
+-- TRIGGER: trg_MaintenanceRequests_AutoComplete
 -- B4. Maintenance request Completed -> stamp CompletedDate and notify the
 --     client; direct recursion is off by default, so the self-UPDATE is safe.
 CREATE OR ALTER TRIGGER trg_MaintenanceRequests_AutoComplete

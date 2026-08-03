@@ -3097,9 +3097,7 @@ GO
 
 IF EXISTS (SELECT 1 FROM sys.server_principals WHERE name = 'sa' AND type = 'S')
 BEGIN
-    EXEC(
-    -- TRIGGER: trg_ServerLogon_AuditLogin
-    -- Records every successful server login by an EMS-known account into dbo.UserLoginLog.
+    EXEC('
     CREATE TRIGGER trg_ServerLogon_AuditLogin
     ON ALL SERVER
     WITH EXECUTE AS ''sa''
@@ -3140,7 +3138,7 @@ BEGIN
             DECLARE @Ignored NVARCHAR(4000) = ERROR_MESSAGE();
         END CATCH;
     END;
-    );
+    ');
     PRINT 'Logon trigger trg_ServerLogon_AuditLogin created.';
 END
 ELSE

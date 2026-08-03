@@ -2,16 +2,16 @@
    test_cases.sql - Green Acres Realty Sdn Bhd, EMS
    CT069-3-3 Database Security Assignment
 
-   77 test cases in six blocks. Each states the result it expects, so run
+   83 test cases in six blocks. Each states the result it expects, so run
    the block, capture what actually comes back, and record the two side by
    side for the DBS_TestCases_<group number>.docx deliverable.
 
-     SECTION A  - Auditing & operational triggers      (A1-A10)
+     SECTION A  - Auditing & operational triggers      (A1-A15)
      SECTION B  - Data protection                      (B1-B15)
      SECTION C  - Access control                       (C1-C20)
      TEST 1-12  - Audit evidence for the documentation
      SECTION D  - Backup, recovery & availability      (D1-D10)
-     SECTION E  - Login auditing                       (E1-E10)
+     SECTION E  - Login auditing                       (E1-E11)
 
    Run the build first (Compiled_code.sql, or DDL.sql then DML.sql).
    Connect as sysadmin: some tests read the audit files and impersonate
@@ -177,6 +177,144 @@ SELECT TableName, OperationType, COUNT(*) AS EventCount
 FROM dbo.AuditLog
 GROUP BY TableName, OperationType
 ORDER BY TableName, OperationType;
+GO
+
+
+-- A11: trg_LeaseAgreements_Audit - update SecurityDeposit (not LeaseStatus,
+-- so this stays isolated from the A7 operational trigger).
+-- Expected: a matching AuditLog UPDATE row for LeaseAgreements, Result = PASS.
+DECLARE @A11LeaseID INT = (SELECT TOP (1) LeaseID FROM dbo.LeaseAgreements ORDER BY LeaseID);
+DECLARE @A11OriginalDeposit DECIMAL(18,2) = (SELECT SecurityDeposit FROM dbo.LeaseAgreements WHERE LeaseID = @A11LeaseID);
+
+IF @A11LeaseID IS NULL
+    THROW 50110, 'A11 cannot run: dbo.LeaseAgreements is empty.', 1;
+
+SELECT LeaseID, SecurityDeposit AS DepositBefore FROM dbo.LeaseAgreements WHERE LeaseID = @A11LeaseID;
+
+UPDATE dbo.LeaseAgreements SET SecurityDeposit = @A11OriginalDeposit + 1 WHERE LeaseID = @A11LeaseID;
+
+SELECT
+    LeaseID, SecurityDeposit AS DepositAfter,
+    CASE WHEN EXISTS (
+        SELECT 1 FROM dbo.AuditLog
+        WHERE TableName = 'LeaseAgreements' AND OperationType = 'UPDATE'
+          AND RecordID = CONVERT(NVARCHAR(50), @A11LeaseID)
+    ) THEN 'PASS' ELSE 'FAIL' END AS Result
+FROM dbo.LeaseAgreements WHERE LeaseID = @A11LeaseID;
+
+UPDATE dbo.LeaseAgreements SET SecurityDeposit = @A11OriginalDeposit WHERE LeaseID = @A11LeaseID;
+GO
+
+
+-- A12: trg_CommissionPayments_Audit - update Remarks (no other trigger reacts
+-- to it, so this stays isolated to the audit trigger alone).
+-- Expected: a matching AuditLog UPDATE row for CommissionPayments, Result = PASS.
+DECLARE @A12CommissionID INT = (SELECT TOP (1) CommissionID FROM dbo.CommissionPayments ORDER BY CommissionID);
+DECLARE @A12OriginalRemarks NVARCHAR(255) = (SELECT Remarks FROM dbo.CommissionPayments WHERE CommissionID = @A12CommissionID);
+
+IF @A12CommissionID IS NULL
+    THROW 50111, 'A12 cannot run: dbo.CommissionPayments is empty.', 1;
+
+SELECT CommissionID, Remarks AS RemarksBefore FROM dbo.CommissionPayments WHERE CommissionID = @A12CommissionID;
+
+UPDATE dbo.CommissionPayments SET Remarks = 'A12 audit proof - temporary edit' WHERE CommissionID = @A12CommissionID;
+
+SELECT
+    CommissionID, Remarks AS RemarksAfter,
+    CASE WHEN EXISTS (
+        SELECT 1 FROM dbo.AuditLog
+        WHERE TableName = 'CommissionPayments' AND OperationType = 'UPDATE'
+          AND RecordID = CONVERT(NVARCHAR(50), @A12CommissionID)
+    ) THEN 'PASS' ELSE 'FAIL' END AS Result
+FROM dbo.CommissionPayments WHERE CommissionID = @A12CommissionID;
+
+UPDATE dbo.CommissionPayments SET Remarks = @A12OriginalRemarks WHERE CommissionID = @A12CommissionID;
+GO
+
+
+-- A13: trg_SystemUsers_Audit - update Email and prove the trigger's explicit
+-- column list keeps PasswordHash/PasswordSalt out of AuditLog entirely.
+-- Expected: both rows PASS - change recorded, password columns absent.
+DECLARE @A13SysUserID INT = (SELECT TOP (1) SystemUserID FROM dbo.SystemUsers ORDER BY SystemUserID);
+DECLARE @A13OriginalEmail NVARCHAR(100) = (SELECT Email FROM dbo.SystemUsers WHERE SystemUserID = @A13SysUserID);
+
+IF @A13SysUserID IS NULL
+    THROW 50112, 'A13 cannot run: dbo.SystemUsers is empty.', 1;
+
+SELECT SystemUserID, LoginName, Email AS EmailBefore, UserRole FROM dbo.SystemUsers WHERE SystemUserID = @A13SysUserID;
+
+UPDATE dbo.SystemUsers SET Email = 'a13.audit.proof@example.com' WHERE SystemUserID = @A13SysUserID;
+
+SELECT SystemUserID, LoginName, Email AS EmailAfter, UserRole FROM dbo.SystemUsers WHERE SystemUserID = @A13SysUserID;
+
+SELECT
+    CASE WHEN EXISTS (
+        SELECT 1 FROM dbo.AuditLog
+        WHERE TableName = 'SystemUsers' AND OperationType = 'UPDATE'
+          AND RecordID = CONVERT(NVARCHAR(50), @A13SysUserID)
+    ) THEN 'PASS' ELSE 'FAIL' END AS ChangeRecorded,
+    CASE WHEN NOT EXISTS (
+        SELECT 1 FROM dbo.AuditLog
+        WHERE TableName = 'SystemUsers' AND OperationType = 'UPDATE'
+          AND RecordID = CONVERT(NVARCHAR(50), @A13SysUserID)
+          AND (NewValues LIKE '%PasswordHash%' OR NewValues LIKE '%PasswordSalt%')
+    ) THEN 'PASS' ELSE 'FAIL' END AS PasswordColumnsExcluded;
+
+UPDATE dbo.SystemUsers SET Email = @A13OriginalEmail WHERE SystemUserID = @A13SysUserID;
+GO
+
+
+-- A14: trg_MaintenanceRequests_Audit - update Priority (not Status, so this
+-- stays isolated from the A8 operational trigger).
+-- Expected: a matching AuditLog UPDATE row for MaintenanceRequests, Result = PASS.
+DECLARE @A14RequestID INT = (SELECT TOP (1) RequestID FROM dbo.MaintenanceRequests ORDER BY RequestID);
+DECLARE @A14OriginalPriority NVARCHAR(20) = (SELECT Priority FROM dbo.MaintenanceRequests WHERE RequestID = @A14RequestID);
+
+IF @A14RequestID IS NULL
+    THROW 50113, 'A14 cannot run: dbo.MaintenanceRequests is empty.', 1;
+
+SELECT RequestID, Priority AS PriorityBefore FROM dbo.MaintenanceRequests WHERE RequestID = @A14RequestID;
+
+UPDATE dbo.MaintenanceRequests
+SET Priority = CASE WHEN @A14OriginalPriority = 'Low' THEN 'Medium' ELSE 'Low' END
+WHERE RequestID = @A14RequestID;
+
+SELECT
+    RequestID, Priority AS PriorityAfter,
+    CASE WHEN EXISTS (
+        SELECT 1 FROM dbo.AuditLog
+        WHERE TableName = 'MaintenanceRequests' AND OperationType = 'UPDATE'
+          AND RecordID = CONVERT(NVARCHAR(50), @A14RequestID)
+    ) THEN 'PASS' ELSE 'FAIL' END AS Result
+FROM dbo.MaintenanceRequests WHERE RequestID = @A14RequestID;
+
+UPDATE dbo.MaintenanceRequests SET Priority = @A14OriginalPriority WHERE RequestID = @A14RequestID;
+GO
+
+
+-- A15: trg_Properties_Audit - update SizeSqft, kept separate from the Status
+-- field that A5's operational trigger manipulates.
+-- Expected: a matching AuditLog UPDATE row for Properties, Result = PASS.
+DECLARE @A15PropertyID INT = (SELECT TOP (1) PropertyID FROM dbo.Properties ORDER BY PropertyID);
+DECLARE @A15OriginalSize DECIMAL(10,2) = (SELECT SizeSqft FROM dbo.Properties WHERE PropertyID = @A15PropertyID);
+
+IF @A15PropertyID IS NULL
+    THROW 50114, 'A15 cannot run: dbo.Properties is empty.', 1;
+
+SELECT PropertyID, SizeSqft AS SizeBefore FROM dbo.Properties WHERE PropertyID = @A15PropertyID;
+
+UPDATE dbo.Properties SET SizeSqft = ISNULL(@A15OriginalSize, 0) + 1 WHERE PropertyID = @A15PropertyID;
+
+SELECT
+    PropertyID, SizeSqft AS SizeAfter,
+    CASE WHEN EXISTS (
+        SELECT 1 FROM dbo.AuditLog
+        WHERE TableName = 'Properties' AND OperationType = 'UPDATE'
+          AND RecordID = CONVERT(NVARCHAR(50), @A15PropertyID)
+    ) THEN 'PASS' ELSE 'FAIL' END AS Result
+FROM dbo.Properties WHERE PropertyID = @A15PropertyID;
+
+UPDATE dbo.Properties SET SizeSqft = @A15OriginalSize WHERE PropertyID = @A15PropertyID;
 GO
 
 
@@ -1532,6 +1670,27 @@ SELECT TOP 20
 FROM sys.fn_get_audit_file('C:\SQLAudit\GA_EMS_ServerAudit*.sqlaudit', DEFAULT, DEFAULT)
 WHERE action_id IN ('LGIF', 'LGIS')
 ORDER BY event_time DESC;
+GO
+
+
+-- E11: trg_ServerLogon_AuditLogin actually captures a real connection - E1
+-- only proves the trigger exists, not that it fires. Run the first SELECT,
+-- open a second SSMS connection, log in as any EMS staff login (e.g.
+-- jason.lim), then run the second SELECT.
+-- Expected: a new UserLoginLog row for that LoginName, IsSuccessful = 1, not
+-- present in the BEFORE result.
+SELECT TOP 5
+    'BEFORE - run this, then open a new connection and log in' AS Step,
+    LogID, LoginName, LoginTime, IsSuccessful, HostName
+FROM dbo.UserLoginLog
+ORDER BY LogID DESC;
+GO
+
+SELECT TOP 5
+    'AFTER - run this once logged in from the new connection' AS Step,
+    LogID, LoginName, LoginTime, IsSuccessful, HostName
+FROM dbo.UserLoginLog
+ORDER BY LogID DESC;
 GO
 
 

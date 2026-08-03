@@ -3094,10 +3094,10 @@ BEGIN
 END;
 GO
 
--- Only create the trigger if we can impersonate 'sa' to do the write.
+
 IF EXISTS (SELECT 1 FROM sys.server_principals WHERE name = 'sa' AND type = 'S')
 BEGIN
-    EXEC('
+    EXEC(
     -- TRIGGER: trg_ServerLogon_AuditLogin
     -- Records every successful server login by an EMS-known account into dbo.UserLoginLog.
     CREATE TRIGGER trg_ServerLogon_AuditLogin
@@ -3140,7 +3140,7 @@ BEGIN
             DECLARE @Ignored NVARCHAR(4000) = ERROR_MESSAGE();
         END CATCH;
     END;
-    ');
+    );
     PRINT 'Logon trigger trg_ServerLogon_AuditLogin created.';
 END
 ELSE
@@ -3692,7 +3692,7 @@ END;
 GO
 
 -- TRIGGER: trg_Transactions_AutoCommission
--- B2. New Transaction -> auto-generate its CommissionPayments row, snapshotting
+-- B2. New Transaction = auto-generate its CommissionPayments row, snapshotting
 --     the agent's current CommissionRate at the time of the sale.
 CREATE OR ALTER TRIGGER trg_Transactions_AutoCommission
 ON dbo.Transactions
@@ -3717,7 +3717,7 @@ END;
 GO
 
 -- TRIGGER: trg_LeaseAgreements_StatusChange
--- B3. Lease Expired/Terminated -> free up the Property (only if no other Active
+-- B3. Lease Expired/Terminated = free up the Property (only if no other Active
 --     lease holds it) and notify the client.
 CREATE OR ALTER TRIGGER trg_LeaseAgreements_StatusChange
 ON dbo.LeaseAgreements
@@ -3760,7 +3760,7 @@ END;
 GO
 
 -- TRIGGER: trg_MaintenanceRequests_AutoComplete
--- B4. Maintenance request Completed -> stamp CompletedDate and notify the
+-- B4. Maintenance request Completed = stamp CompletedDate and notify the
 --     client; direct recursion is off by default, so the self-UPDATE is safe.
 CREATE OR ALTER TRIGGER trg_MaintenanceRequests_AutoComplete
 ON dbo.MaintenanceRequests

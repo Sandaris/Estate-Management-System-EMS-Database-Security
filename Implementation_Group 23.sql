@@ -14,16 +14,19 @@
       9  keys and column additions     19  build verification
      10  encrypt the sensitive columns
 
-   WHY THIS ORDER - three decisions matter:
-     - seed data (3) loads before the triggers (17) exist, so the load fires
-       nothing and dbo.AuditLog starts empty, with no need to disable
-       anything;
-     - encryption (10) runs before masking (12), so it reads the real values
-       instead of encrypting the mask "XXXXXX1234";
-     - backups (18) run last, so the .bak holds the finished database -
-       every table, key, audit object and trigger already exists.
+   Justification for this order (three decisions matter):
+     - Seed data (3) loads before the triggers (17) exist so the load fires
+       nothing and dbo.AuditLog starts empty with no need to disable
+       anything
+     - Encryption (10) runs before masking (12) so it reads the real values
+       instead of encrypting the mask "XXXXXX1234"
+     - Backups (18) run last so the .bak holds the finished database making sure
+	   every table, key, audit object and trigger already exists.
    ======================================================================== */
 
+----------------------------------
+-- PRIMARY SECTION 1: Introduction
+----------------------------------
 
 USE master;
 GO
@@ -36,9 +39,8 @@ BEGIN
 END;
 GO
 
--- Kick any leftover sessions off the database, otherwise DROP DATABASE fails
--- with "database is currently in use" when someone still has a query window
--- open against GreenAcresEMS.
+-- Kick any leftover sessions off the database cause DROP DATABASE fails with 'database is currently in use' error when query window is still open against GreenAcresEMS.
+
 IF EXISTS (SELECT name FROM sys.databases WHERE name = 'GreenAcresEMS')
 BEGIN
     ALTER DATABASE GreenAcresEMS SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
@@ -60,8 +62,10 @@ GO
 
 
 /* ========================================================================
-   REQUIREMENT 12: ADD NEW TABLE OR EDIT EXISTING TABLE
+   Assignment Requirement 12: Add New Table Or Edit Existing Table
    ======================================================================== */
+
+-- Properties (Enhanced): Added PropertyType, Bedrooms, Bathrooms,Sizesqft, IsActive
 CREATE TABLE Properties (
     PropertyID      INT             IDENTITY(1,1)   PRIMARY KEY,
     PropertyName    NVARCHAR(150)   NOT NULL,
@@ -82,7 +86,7 @@ CREATE TABLE Properties (
 );
 GO
 
--- Enhanced: added NRIC (for encryption later), ClientType, IsActive.
+-- Clients (Enhanced): Added NRIC (for encryption), ClientType, IsActive
 CREATE TABLE Clients (
     ClientID        INT             IDENTITY(1,1)   PRIMARY KEY,
     FullName        NVARCHAR(100)   NOT NULL,
@@ -96,7 +100,8 @@ CREATE TABLE Clients (
     RegisteredDate  DATETIME        NOT NULL        DEFAULT GETDATE()
 );
 GO
--- Enhanced: added DepartmentID (FK), LicenseNumber, IsActive.
+
+-- Agents (Enhanced): Added DepartmentID (FK), LicenseNumber, IsActive
 CREATE TABLE Agents (
     AgentID         INT             IDENTITY(1,1)   PRIMARY KEY,
     FullName        NVARCHAR(100)   NOT NULL,
@@ -109,8 +114,8 @@ CREATE TABLE Agents (
     JoinedDate      DATETIME        NOT NULL        DEFAULT GETDATE()
 );
 GO
--- Enhanced: added RentEndDate, PaymentStatus, PaymentMethod for lease/sale
--- lifecycle tracking.
+
+-- Transactions (Enhanced): Added RentEndDate, PaymentStatus, PaymentMethod for lease/sale lifecycle tracking
 CREATE TABLE Transactions (
     TransactionID   INT             IDENTITY(1,1)   PRIMARY KEY,
     PropertyID      INT             NOT NULL
@@ -131,8 +136,7 @@ CREATE TABLE Transactions (
 );
 GO
 
--- Enhanced: added AssignedStaffID, Priority, CompletedDate, EstimatedCost,
--- ActualCost for full work-order tracking.
+-- MaintenanceRequests (Enhanced): Added AssignedStaffID, Priority, CompletedDate, EstimatedCost, ActualCost for full work-order tracking
 CREATE TABLE MaintenanceRequests (
     RequestID       INT             IDENTITY(1,1)   PRIMARY KEY,
     PropertyID      INT             NOT NULL
@@ -152,8 +156,7 @@ CREATE TABLE MaintenanceRequests (
 GO
 
 
--- Represents the IT and business departments formed during the company's
--- expansion.
+-- Departments (New): Represents the IT and business departments formed during the company's expansion
 CREATE TABLE Departments (
     DepartmentID    INT             IDENTITY(1,1)   PRIMARY KEY,
     DepartmentName  NVARCHAR(100)   NOT NULL        UNIQUE,
@@ -164,8 +167,7 @@ CREATE TABLE Departments (
 GO
 
 
--- Internal IT/staff users who access the EMS database (developers, DBAs,
--- analysts).
+-- SystemUsers (New): Internal IT/staff users who access the EMS database (developers, DBAs, analysts)
 CREATE TABLE SystemUsers (
     SystemUserID    INT             IDENTITY(1,1)   PRIMARY KEY,
     DepartmentID    INT             NOT NULL
@@ -185,7 +187,7 @@ CREATE TABLE SystemUsers (
 );
 GO
 
--- Tracks every login attempt (success + failure) against the EMS.
+-- UserLoginLog (New): Tracks every login attempt (success + failure) against the EMS
 CREATE TABLE UserLoginLog (
     LogID           INT             IDENTITY(1,1)   PRIMARY KEY,
     SystemUserID    INT             NULL            -- NULL if login name not matched
@@ -201,8 +203,7 @@ CREATE TABLE UserLoginLog (
 GO
 
 
--- Central audit trail for all DML events (INSERT, UPDATE, DELETE) across
--- sensitive tables.
+-- AuditLog (New): Central audit trail for all DML events (INSERT, UPDATE, DELETE) across sensitive tables.
 CREATE TABLE AuditLog (
     AuditID         INT             IDENTITY(1,1)   PRIMARY KEY,
     EventTime       DATETIME        NOT NULL        DEFAULT GETDATE(),
@@ -219,8 +220,7 @@ CREATE TABLE AuditLog (
 GO
 
 
--- 10. LeaseAgreements - Formalises rental agreements between clients and
--- properties.
+-- LeaseAgreements (New): Formalises rental agreements between clients and properties.
 CREATE TABLE LeaseAgreements (
     LeaseID             INT             IDENTITY(1,1)   PRIMARY KEY,
     TransactionID       INT             NOT NULL        UNIQUE  -- 1 lease per rental transaction
@@ -242,8 +242,7 @@ CREATE TABLE LeaseAgreements (
 GO
 
 
--- 11. CommissionPayments - Tracks commission earned and paid to agents per
--- transaction.
+-- CommissionPayments (New): Tracks commission earned and paid to agents per transaction.
 CREATE TABLE CommissionPayments (
     CommissionID    INT             IDENTITY(1,1)   PRIMARY KEY,
     TransactionID   INT             NOT NULL
@@ -260,13 +259,13 @@ CREATE TABLE CommissionPayments (
 GO
 
 
--- 12. MaintenanceStaff - Tracks in-house or contracted maintenance workers.
+-- MaintenanceStaff (New): Tracks in-house or contracted maintenance workers.
 CREATE TABLE MaintenanceStaff (
     StaffID         INT             IDENTITY(1,1)   PRIMARY KEY,
     FullName        NVARCHAR(100)   NOT NULL,
     ContactNumber   NVARCHAR(20)    NOT NULL,       -- [SENSITIVE - will be masked]
     Specialisation  NVARCHAR(100)   NULL,           -- 'Plumbing','Electrical','General', etc.
-    IsContractor    BIT             NOT NULL        DEFAULT 0,  -- 0=in-house, 1=external
+    IsContractor    BIT             NOT NULL        DEFAULT 0,  -- 0 = in-house, 1 = external
     IsActive        BIT             NOT NULL        DEFAULT 1,
     JoinedDate      DATETIME        NOT NULL        DEFAULT GETDATE()
 );
@@ -279,8 +278,7 @@ ALTER TABLE MaintenanceRequests
         CONSTRAINT FK_Maint_Staff FOREIGN KEY REFERENCES MaintenanceStaff(StaffID);
 GO
 
--- 13. Notifications - Stores system notifications sent to clients or agents
--- (lease expiry reminders, maintenance updates, etc.).
+-- Notifications (New): Stores system notifications sent to clients or agents (lease expiry reminders, maintenance updates, etc.)
 CREATE TABLE Notifications (
     NotificationID  INT             IDENTITY(1,1)   PRIMARY KEY,
     RecipientType   NVARCHAR(20)    NOT NULL
@@ -300,12 +298,12 @@ GO
 
 
 /* ========================================================================
-   PART 3: SEED DATA - 467 rows across 10 tables
-   Loaded before any trigger exists, so nothing fires during the load and
-   dbo.AuditLog starts empty.
+   ORDER PART 3: Seed Data (467 rows across 10 tables) 
+
+   -- Loaded before any trigger exists so that nothing fires during the load and dbo.AuditLog starts empty.
    ======================================================================== */
 
--- INSERTING VALUES residential, commercial, industrial and land properties.
+-- Inserting Property values (residential, commercial, industrial and land properties)
 
 INSERT INTO Properties
 (PropertyName, Address, City, State, PostalCode, PropertyType, Bedrooms, Bathrooms, SizeSqft, Price, Status)
@@ -361,8 +359,7 @@ VALUES
 ('Mont Kiara Executive Suites', 'Unit E-22-05, Jalan Kiara Executive Residences', 'Kuala Lumpur', 'Kuala Lumpur', '50480', 'Residential', 4, 3, 2500, 2100000, 'Reserved'),
 ('Iskandar Puteri Smart Offices', 'Suite 25-01, Medini Smart Business Tower', 'Iskandar Puteri', 'Johor', '79250', 'Commercial', NULL, 6, 11000, 8300000, 'Available');
 
--- Data includes individual and corporate clients for EMS testing, encryption,
--- masking and reporting.
+-- Inserting Client values (includes individual and corporate clients for EMS testing, encryption, masking and reporting)
 
 INSERT INTO Clients
 (FullName, NRIC, ContactNumber, Email, Address, ClientType)
@@ -418,8 +415,7 @@ VALUES
 ('Janice Foo', '970909105555', '0128989898', 'janice.foo@gmail.com', 'Unit C-14-07, Bangsar, Kuala Lumpur', 'Individual'),
 ('Vimal Raj', '920202145555', '0173434343', 'vimal.raj@gmail.com', 'No. 18, Jalan Ipoh, Kuala Lumpur', 'Individual');
 
--- including contact details, license numbers and commission rates for EMS
--- operational, reporting and security testing.
+-- Inserting Agents values (include contact details, license numbers and commission rates for EMS operational, reporting and security testing)
 
 INSERT INTO Agents
 (FullName, ContactNumber, Email, LicenseNumber, CommissionRate)
@@ -475,7 +471,7 @@ VALUES
 ('Ruben Pillai', '0151234504', 'ruben.pillai@ems.com.my', 'REN45869', 3.35),
 ('Farzana Malik', '0162345615', 'farzana.malik@ems.com.my', 'REN45870', 2.90);
 
--- records linked to different properties, clients and agents.
+-- Inserting Transaction values (linked to different properties, clients and agents)
 
 INSERT INTO Transactions
 (PropertyID, ClientID, AgentID, TransactionType, Amount, RentStartDate, RentEndDate, PaymentStatus, PaymentMethod)
@@ -531,8 +527,7 @@ VALUES
 (49, 42, 10, 'Sale', 2100000.00, NULL, NULL, 'Pending', 'Bank Transfer'),
 (50, 49, 2, 'Sale', 8300000.00, NULL, NULL, 'Completed', 'Cheque');
 
--- Added 50 realistic maintenance request records covering plumbing, electrical,
--- structural and facility maintenance.
+-- Inserting MaintenanceRequests values (50 realistic maintenance request records covering plumbing, electrical, structural and facility maintenance)
 
 INSERT INTO MaintenanceRequests
 (PropertyID, RequestedByClientID, RequestDetails, Priority, RequestDate, Status, EstimatedCost, ActualCost, CompletedDate)
@@ -588,8 +583,7 @@ VALUES
 (49, 42, 'Executive suite smart lock malfunction.', 'High', '2026-03-08', 'In Progress', 2600.00, NULL, NULL),
 (50, 49, 'Commercial office carpet water damage repair.', 'Medium', '2026-03-06', 'Completed', 1800.00, 1850.00, '2026-03-12');
   
--- representing operational, administrative and technical divisions used for EMS
--- user and role management.
+-- Inserting Departments values (include operational, administrative and technical divisions used for EMS user and role management)
 
 INSERT INTO Departments
 (DepartmentName, Description)
@@ -645,7 +639,7 @@ VALUES
 ('Technical Operations', 'Handles technical infrastructure operations and monitoring.'),
 ('Compliance Monitoring', 'Tracks compliance adherence and reporting activities.');
 
--- IT, operational and administrative personnel.
+-- Inserting SystemUsers values (involve IT, operational and administrative personnel)
 
 
 INSERT INTO SystemUsers
@@ -702,8 +696,7 @@ VALUES
 (31, 'Ruben Pillai', 'ruben.pillai', 'ruben.pillai@ems.com.my', HASHBYTES('SHA2_256', CONCAT('Ruben@123', 'E4#xK8')), 'E4#xK8', 'ClientPortalDev'),
 (32, 'Farzana Malik', 'farzana.malik', 'farzana.malik@ems.com.my', HASHBYTES('SHA2_256', CONCAT('Farzana@123', 'O1@mH5')), 'O1@mH5', 'PropMgmtDev');
 
--- 10. LeaseAgreements - Added realistic Malaysian lease agreement records
--- linked only to rental transactions from the Transactions table.
+-- Inserting LeaseAgreements values (realistic Malaysian lease agreement records linked only to rental transactions from the Transactions table)
 
 INSERT INTO LeaseAgreements
 (TransactionID, PropertyID, ClientID, LeaseStartDate, LeaseEndDate, MonthlyRent, SecurityDeposit, LeaseStatus, AgreementDocPath, SignedDate)
@@ -726,7 +719,7 @@ VALUES
 (45, 45, 47, '2026-06-20', '2028-06-20', 8300.00, 16600.00, 'Active', 'docs/leases/LA-TR045.pdf', '2026-06-15'),
 (48, 48, 50, '2026-01-25', '2027-01-25', 2700.00, 5400.00, 'Active', 'docs/leases/LA-TR048.pdf', '2026-01-21');
 
--- 11. CommissionPayments - linked to existing transactions and agents.
+-- Inserting CommissionPayments values (linked to existing transactions and agents)
 
 INSERT INTO CommissionPayments
 (TransactionID, AgentID, CommissionRate, CommissionAmount, PaymentStatus, PaymentDate, Remarks)
@@ -782,8 +775,7 @@ VALUES
 (49, 10, 2.50, 52500.00, 'Unpaid', NULL, 'Commission pending transaction completion.'),
 (50, 2, 2.40, 199200.00, 'Paid', '2026-06-10', 'Commission settled for completed sale.');
 
--- 12. MaintenanceStaff - covering in-house and contractor-based maintenance
--- teams.
+-- Inserting MaintenanceStaff values (include in-house and contractor-based maintenance teams like staff specialisations, employment types and operational workforce tracking)
 
 INSERT INTO MaintenanceStaff
 (FullName, ContactNumber, Specialisation, IsContractor, JoinedDate)
@@ -840,15 +832,16 @@ VALUES
 ('Navin Raj', '019-7766123', 'General Maintenance', 0, '2023-11-19');
 GO
 
+-------------------------------------------
+-- PRIMARY SECTION 2: Permission Management 
+-------------------------------------------
 
 USE GreenAcresEMS;
 GO
 
 
--- Clean-up before creating principals Database-scoped principals (roles +
--- users) do NOT need to be dropped here: the DROP DATABASE / CREATE DATABASE at
--- the very top of this script already destroyed every role and user that lived
--- inside GreenAcresEMS.
+-- Clean-up before creating Database-scoped principals (roles + users) is not required (Database reset already did in the beginning)
+
 DECLARE @EmsLogins TABLE (LoginName SYSNAME);
 
 INSERT INTO @EmsLogins (LoginName)
@@ -870,8 +863,7 @@ BEGIN
     IF SUSER_ID(@LoginName) IS NOT NULL
     BEGIN
         BEGIN TRY
-            -- QUOTENAME protects the identifier even though these names are
-            -- hard-coded here (defence in depth / consistent style).
+            -- QUOTENAME helps protect the identifier even if names are hard-coded (ensures consistency)
             SET @sql = N'DROP LOGIN ' + QUOTENAME(@LoginName) + N';';
             EXEC sys.sp_executesql @sql;
             PRINT 'Dropped orphaned login: ' + @LoginName;
@@ -890,11 +882,14 @@ DEALLOCATE login_cursor;
 PRINT 'Login clean-up finished. Ready to create roles and users.';
 GO
 
--- Create the 6 necessary roles
+
 
 /* ========================================================================
-   REQUIREMENT 3: ROLE
+   Assignment Requirement 3: ROLE
    ======================================================================== */
+
+-- Create the 6 necessary roles
+
 CREATE ROLE role_Admin;
 CREATE ROLE role_DBA;
 CREATE ROLE role_PropMgmtDev;
@@ -905,11 +900,15 @@ GO
 
 
 /* ========================================================================
-   REQUIREMENT 4: USER (AND PERMISSIONS)
-   Every IT staff member gets their OWN login with a UNIQUE password, so that
-   the audit trail (ORIGINAL_LOGIN()) can attribute every change to a single
-   named person.
+   Assignment Requirement 4: USER (AND PERMISSIONS)
    ======================================================================== */
+
+   --    Every IT staff member gets their own login with a unique password so that the audit trail (ORIGINAL_LOGIN()) can link every change to a single named person.
+
+   
+   -- USERS:
+   -- DBA users  (Database Administration)
+
 IF SUSER_ID('arun.kumar') IS NULL
     CREATE LOGIN [arun.kumar] WITH PASSWORD = 'Dba#Arun!7fK2026',
         CHECK_POLICY = ON,       -- enforce Windows password complexity
@@ -931,6 +930,8 @@ IF USER_ID('linda.tan') IS NULL
 GO
 ALTER ROLE role_DBA ADD MEMBER [linda.tan];
 GO
+
+-- Admin users  (IT dept / Cybersecurity managers)
 
 IF SUSER_ID('farid.rahman') IS NULL
     CREATE LOGIN [farid.rahman] WITH PASSWORD = 'Adm#Farid!8xR2026',
@@ -954,6 +955,7 @@ GO
 ALTER ROLE role_Admin ADD MEMBER [melissa.wong];
 GO
 
+-- Property Management developers
 
 IF SUSER_ID('kelvin.ong') IS NULL
     CREATE LOGIN [kelvin.ong] WITH PASSWORD = 'Prp#Kelvin!9bL2026',
@@ -977,6 +979,8 @@ GO
 ALTER ROLE role_PropMgmtDev ADD MEMBER [aminah.salleh];
 GO
 
+-- Client Portal developers
+
 IF SUSER_ID('vijay.menon') IS NULL
     CREATE LOGIN [vijay.menon] WITH PASSWORD = 'Ptl#Vijay!6vD2026',
         CHECK_POLICY = ON,       -- enforce Windows password complexity
@@ -998,6 +1002,8 @@ IF USER_ID('sofia.aziz') IS NULL
 GO
 ALTER ROLE role_ClientPortalDev ADD MEMBER [sofia.aziz];
 GO
+
+-- Analysts  (Data Analytics department)
 
 IF SUSER_ID('hakim.zulkifli') IS NULL
     CREATE LOGIN [hakim.zulkifli] WITH PASSWORD = 'Anl#Hakim!7hJ2026',
@@ -1021,6 +1027,8 @@ GO
 ALTER ROLE role_Analyst ADD MEMBER [rachel.lee];
 GO
 
+-- Read-only staff  (Audit, Application Support, etc.)
+
 IF SUSER_ID('jason.lim') IS NULL
     CREATE LOGIN [jason.lim] WITH PASSWORD = 'Ro#Jason!5yT2026',
         CHECK_POLICY = ON,       -- enforce Windows password complexity
@@ -1043,11 +1051,14 @@ GO
 ALTER ROLE role_ReadOnly ADD MEMBER [nurul.huda];
 GO
 
+-- PERMISSIONS:
+
+-- DBA (Full control with UNMASK & Able to alter any information)
 
 GRANT CONTROL ON DATABASE::GreenAcresEMS TO role_DBA;
 GO
 
--- Server-level permission for the DBA logins.
+-- Provide server-level permission for the DBA logins/ users
 USE master;
 GO
 
@@ -1055,16 +1066,18 @@ GRANT ALTER ANY LOGIN TO [arun.kumar];
 GRANT ALTER ANY LOGIN TO [linda.tan];
 GO
 
--- VIEW ANY DEFINITION lets the DBAs inspect object definitions across the
--- instance when troubleshooting, without any data access.
+-- 'VIEW ANY DEFINITION' lets the DBAs to inspect object definitions across the instance when troubleshooting without any data access.
 GRANT VIEW ANY DEFINITION TO [arun.kumar];
 GRANT VIEW ANY DEFINITION TO [linda.tan];
 GO
 
+
+
 USE GreenAcresEMS;
 GO
 
---      (They need to resolve client queries)
+-- Admin (Broad operational read/write + UNMASK for PII as they need to resolve client queries)
+
 GRANT SELECT, INSERT, UPDATE ON dbo.Properties          TO role_Admin;
 GRANT SELECT, INSERT, UPDATE ON dbo.Clients             TO role_Admin;
 GRANT SELECT, INSERT, UPDATE ON dbo.Agents              TO role_Admin;
@@ -1080,7 +1093,9 @@ GRANT SELECT, INSERT, UPDATE ON dbo.MaintenanceStaff    TO role_Admin;
 GRANT UNMASK TO role_Admin;
 GO
 
---      Property + maintenance domain & read on supporting tables
+
+-- Property Management developer (Property + maintenance domain & read on supporting tables)
+
 GRANT SELECT, INSERT, UPDATE ON dbo.Properties          TO role_PropMgmtDev;
 GRANT SELECT, INSERT, UPDATE ON dbo.MaintenanceRequests TO role_PropMgmtDev;
 GRANT SELECT, INSERT, UPDATE ON dbo.MaintenanceStaff    TO role_PropMgmtDev;
@@ -1091,7 +1106,9 @@ GRANT SELECT                  ON dbo.Departments        TO role_PropMgmtDev;
 DENY  SELECT ON dbo.CommissionPayments                  TO role_PropMgmtDev;
 GO
 
---      Client & transaction domain
+
+-- Client Portal developer (Client & transaction domain)
+
 GRANT SELECT, INSERT, UPDATE ON dbo.Clients             TO role_ClientPortalDev;
 GRANT SELECT                  ON dbo.Properties         TO role_ClientPortalDev;
 GRANT SELECT, INSERT, UPDATE ON dbo.Transactions        TO role_ClientPortalDev;
@@ -1099,7 +1116,9 @@ GRANT SELECT, INSERT, UPDATE ON dbo.LeaseAgreements     TO role_ClientPortalDev;
 GRANT SELECT                  ON dbo.Agents             TO role_ClientPortalDev;
 GO
 
---      Read-only across the reporting domain
+
+-- Analyst (Read-only reporting via views only & Not granted UNMASK so analysts see anonymised PII)
+
 GRANT SELECT ON dbo.Properties          TO role_Analyst;
 GRANT SELECT ON dbo.Transactions        TO role_Analyst;
 GRANT SELECT ON dbo.MaintenanceRequests TO role_Analyst;
@@ -1108,9 +1127,17 @@ GRANT SELECT ON dbo.Departments         TO role_Analyst;
 GO
 
 
+--  ReadOnly: No base-table grants at all (Access is only through safe views hence skipped)
+
+
 /* ========================================================================
-   REQUIREMENT 1: VIEW
+   Assignment Requirement 1: VIEW
    ======================================================================== */
+
+-- Give selective column and information viewing (Base tables cannot be accessed directly)
+
+ -- vw_PropertyListing: Property listing (List of Properties with their information & status)
+
 CREATE OR ALTER VIEW vw_PropertyListing
 AS
     SELECT
@@ -1130,6 +1157,8 @@ AS
 GO
 
 
+-- vw_ClientDirectory: Client directory (List of clients and their respective information)
+
 CREATE OR ALTER VIEW vw_ClientDirectory
 AS
     SELECT
@@ -1144,6 +1173,8 @@ AS
     FROM dbo.Clients;
 GO
 
+
+-- vw_ActiveLeases: Active leases (List of properties that still have Active lease status)
 
 CREATE OR ALTER VIEW vw_ActiveLeases
 AS
@@ -1162,6 +1193,7 @@ AS
     WHERE l.LeaseStatus = 'Active';
 GO
 
+-- vw_AgentPerformance: Agent performance (List of Agents with their compiled sales/ performance and their values)
 
 CREATE OR ALTER VIEW vw_AgentPerformance
 AS
@@ -1179,6 +1211,7 @@ AS
     GROUP BY a.AgentID, a.FullName, a.LicenseNumber;
 GO
 
+-- vw_MonthlySalesSummary: Monthly sales summary (Revenue summary of rent and sale transactions based on sales year and month)
 
 CREATE OR ALTER VIEW vw_MonthlySalesSummary
 AS
@@ -1196,6 +1229,7 @@ AS
         t.TransactionType;
 GO
 
+-- vw_MaintenanceOverview: Maintenance overview (List of properties with Maintenance works and their respective details/progress)
 
 CREATE OR ALTER VIEW vw_MaintenanceOverview
 AS
@@ -1213,6 +1247,7 @@ AS
     LEFT  JOIN dbo.MaintenanceStaff s ON s.StaffID    = m.AssignedStaffID;
 GO
 
+-- vw_CommissionSummary: Commission summary (List of Agents and their commission details & history)
 
 CREATE OR ALTER VIEW vw_CommissionSummary
 AS
@@ -1230,8 +1265,7 @@ AS
 GO
 
 
--- 4.8 View-Level Permission Grants Read-only and Analyst roles get SELECT on
--- views only.
+-- View-Level Permission Grants (Read-only and Analyst roles get SELECT on views only)
 
 -- role_Admin: All views (Direct table access)
 GRANT SELECT ON vw_PropertyListing     TO role_Admin;
@@ -1271,13 +1305,40 @@ GRANT SELECT ON vw_MaintenanceOverview TO role_ReadOnly;
 GO
 
 
--- When ClientID is NULL = INSERT new client When ClientID is Non-NULL= UPDATE
--- info (Only selected details)
+
 
 
 /* ========================================================================
-   REQUIREMENT 2: STORED PROCEDURE
+   Assignment Requirement 2: STORED PROCEDURE
    ======================================================================== */
+
+--     Client Management:
+--       usp_ManageClient         
+--       usp_DeactivateClient
+--       usp_ReactivateClient 
+
+--     Property Management:
+--       usp_ManageProperty       
+--       usp_UpdatePropertyStatus 
+
+--     Transaction / Operations:
+--       usp_RecordTransaction 
+--       usp_UpdateTransactionStatus
+--       usp_LogMaintenanceRequest 
+--       usp_AssignMaintenanceStaff 
+
+--     Reporting:
+--       usp_GetAgentTransactions
+
+--     User Access Management:
+--       usp_ProvisionUser 
+--       usp_DeprovisionUser 
+
+
+-- usp_ManageClient (Adding a new client)
+-- When ClientID is NULL = INSERT new client 
+-- When ClientID is Non-NULL (Has existing information)= UPDATE info (Only selected details)
+
 CREATE OR ALTER PROCEDURE dbo.usp_ManageClient
     @ClientID      INT            = NULL,
     @FullName      NVARCHAR(100)  = NULL,
@@ -1335,6 +1396,8 @@ BEGIN
 END;
 GO
 
+-- usp_DeactivateClient (Deactivating an existing client - Soft delete)
+
 CREATE OR ALTER PROCEDURE dbo.usp_DeactivateClient
     @ClientID INT
 AS
@@ -1354,6 +1417,9 @@ BEGIN
     PRINT 'Client deactivated.';
 END;
 GO
+
+
+-- usp_ReactivateClient (Undo - Reactivating a deactivated client)
 
 CREATE OR ALTER PROCEDURE dbo.usp_ReactivateClient
     @ClientID INT
@@ -1382,6 +1448,8 @@ BEGIN
     PRINT 'Client reactivated successfully.';
 END;
 GO
+
+-- usp_ManageProperty (Adding a new property & Updating an existing property)
 
 CREATE OR ALTER PROCEDURE dbo.usp_ManageProperty
     @PropertyID   INT            = NULL,
@@ -1451,6 +1519,8 @@ BEGIN
 END;
 GO
 
+-- usp_UpdatePropertyStatus (Changing status of existing property - Cannot be other than predetermined status)
+
 CREATE OR ALTER PROCEDURE dbo.usp_UpdatePropertyStatus
     @PropertyID INT,
     @NewStatus  NVARCHAR(50)
@@ -1477,6 +1547,8 @@ BEGIN
     PRINT 'Property status updated to: ' + @NewStatus;
 END;
 GO
+
+-- usp_RecordTransaction  (Adding a new sale/rent transaction record - Makes sure all info are available)
 
 CREATE OR ALTER PROCEDURE dbo.usp_RecordTransaction
     @PropertyID      INT,
@@ -1519,6 +1591,8 @@ BEGIN
 END;
 GO
 
+-- usp_UpdateTransactionStatus (Update payment status of existing transaction)
+
 CREATE OR ALTER PROCEDURE dbo.usp_UpdateTransactionStatus
     @TransactionID INT,
     @PaymentStatus NVARCHAR(50)
@@ -1548,6 +1622,8 @@ BEGIN
 END;
 GO
 
+-- usp_LogMaintenanceRequest (Raise a new Maintenance Request)
+
 CREATE OR ALTER PROCEDURE dbo.usp_LogMaintenanceRequest
     @PropertyID          INT,
     @RequestedByClientID INT           = NULL,
@@ -1575,6 +1651,8 @@ BEGIN
 END;
 GO
 
+-- usp_AssignMaintenanceStaff (Assigning a respective Maintenance Staff and changing status of request to In Progress)
+
 CREATE OR ALTER PROCEDURE dbo.usp_AssignMaintenanceStaff
     @RequestID INT,
     @StaffID   INT
@@ -1596,6 +1674,8 @@ BEGIN
     PRINT 'Staff assigned and request status set to In Progress.';
 END;
 GO
+
+-- usp_GetAgentTransactions (Full list of per-Agent transactions and history based on Agent ID)
 
 CREATE OR ALTER PROCEDURE dbo.usp_GetAgentTransactions
     @AgentID INT
@@ -1623,9 +1703,7 @@ END;
 GO
 
 
--- usp_ProvisionUser: Single, auditable entry point for onboarding a new IT
--- staff member: creates the login, the database user and the role membership in
--- one step.
+-- usp_ProvisionUser (Single auditable entry point for onboarding a new IT staff member by creating the login, the database user and the role membership in one step)
 CREATE OR ALTER PROCEDURE dbo.usp_ProvisionUser
     @LoginName NVARCHAR(100),
     @Password  NVARCHAR(128),
@@ -1634,9 +1712,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    -- Make sure no empty information is given (checked FIRST, because "NULL NOT
-    -- IN (...)" evaluates to UNKNOWN and would fall through the role check
-    -- below without ever raising an error).
+    -- Make sure no empty information is given (checked first because "NULL NOT IN (...)" evaluates to UNKNOWN and would fall through the role check without raising an error).
     IF @LoginName IS NULL OR LTRIM(RTRIM(@LoginName)) = ''
        OR @Password IS NULL OR @Password = ''
        OR @RoleName IS NULL OR LTRIM(RTRIM(@RoleName)) = ''
@@ -1655,8 +1731,7 @@ BEGIN
         RETURN;
     END;
 
-    -- Whitelist the login name: letters, digits, dot, underscore and hyphen
-    -- only.
+    -- Whitelist the login name: letters, digits, dot, underscore and hyphen only.
     IF @LoginName LIKE '%[^a-zA-Z0-9._-]%'
     BEGIN
         RAISERROR('LoginName may only contain letters, digits, dot, underscore or hyphen.', 16, 1);
@@ -1678,12 +1753,9 @@ BEGIN
 
     DECLARE @sql NVARCHAR(MAX);
 
-    -- CREATE LOGIN's PASSWORD clause cannot be parameterized through
-    -- sp_executesql (SQL Server requires it as a literal in the command
-    -- text), so it is embedded directly below with its single quotes
-    -- doubled - the standard T-SQL escape - rather than left unescaped,
-    -- which is what would reopen the injection hole QUOTENAME closes for
-    -- @LoginName and @RoleName elsewhere in this procedure.
+
+	-- CREATE LOGIN needs the password not as a parameter so the SQL is built as a string. Doubling the single quotes escapes it safely just like the QUOTENAME which protects @LoginName and @RoleName above.
+
     DECLARE @EscapedPassword NVARCHAR(258) = REPLACE(@Password, '''', '''''');
 
     BEGIN TRY
@@ -1709,8 +1781,7 @@ BEGIN
         PRINT @LoginName + ' added successfully.';
     END TRY
     BEGIN CATCH
-        -- Surface the real reason (usually "permission denied" when the caller
-        -- is not a sysadmin / has no ALTER ANY LOGIN).
+        -- Surface the real reason (usually "permission denied" when the caller is not a sysadmin / has no ALTER ANY LOGIN ability).
         DECLARE @msg NVARCHAR(2048) = N'usp_ProvisionUser failed: ' + ERROR_MESSAGE();
         RAISERROR(@msg, 16, 1);
     END CATCH;
@@ -1718,10 +1789,7 @@ END;
 GO
 
 
--- usp_DeprovisionUser: Offboarding counterpart to usp_ProvisionUser: strips
--- role membership, drops the database user, then drops the server login - in
--- that order, because SQL Server refuses to drop a login that still has a
--- mapped user.
+-- usp_DeprovisionUser (Opposite to usp_ProvisionUser removing role membership, drops the database user then drops the server login) (Follows this order because SQL Server won't drop a login with a mapped user)
 CREATE OR ALTER PROCEDURE dbo.usp_DeprovisionUser
     @LoginName NVARCHAR(100)
 AS
@@ -1734,8 +1802,7 @@ BEGIN
         RETURN;
     END;
 
-    -- Same whitelist as usp_ProvisionUser - never build dynamic SQL from an
-    -- unvalidated identifier.
+    -- Same whitelist as usp_ProvisionUser (Never build dynamic SQL from an unvalidated identifier)
     IF @LoginName LIKE '%[^a-zA-Z0-9._-]%'
     BEGIN
         RAISERROR('LoginName may only contain letters, digits, dot, underscore or hyphen.', 16, 1);
@@ -1795,10 +1862,14 @@ BEGIN
 END;
 GO
 
--- 5.13 Procedure-Level Execute Grants (Roles receive EXECUTE only on procedures
--- relevant to their job function)
+-- Procedure-Level Execute Grants (Roles receive EXECUTE only on procedures relevant to their job function)
 
--- Admin: All procedures (Full operational scope)
+-- User provisioning is a DBA duty and not a business-admin duty so EXECUTE on the two provisioning procedures goes to role_DBA only
+GRANT EXECUTE ON dbo.usp_ProvisionUser			TO role_DBA;
+GRANT EXECUTE ON dbo.usp_DeprovisionUser		TO role_DBA;
+GO
+
+-- Admin: All procedures except User Provisioning (Full operational scope)
 GRANT EXECUTE ON dbo.usp_ManageClient           TO role_Admin;
 GRANT EXECUTE ON dbo.usp_DeactivateClient       TO role_Admin;
 GRANT EXECUTE ON dbo.usp_ReactivateClient		TO role_Admin;
@@ -1809,11 +1880,6 @@ GRANT EXECUTE ON dbo.usp_UpdateTransactionStatus TO role_Admin;
 GRANT EXECUTE ON dbo.usp_LogMaintenanceRequest  TO role_Admin;
 GRANT EXECUTE ON dbo.usp_AssignMaintenanceStaff TO role_Admin;
 GRANT EXECUTE ON dbo.usp_GetAgentTransactions   TO role_Admin;
--- User provisioning is a DBA duty, not a business-admin duty, so EXECUTE on the
--- two provisioning procedures goes to role_DBA only.
-GRANT EXECUTE ON dbo.usp_ProvisionUser			TO role_DBA;
-GRANT EXECUTE ON dbo.usp_DeprovisionUser		TO role_DBA;
-GO
 
 -- PropMgmtDev: Property & Maintenance procedures only
 GRANT EXECUTE ON dbo.usp_ManageProperty         TO role_PropMgmtDev;
@@ -1834,6 +1900,10 @@ GO
 GRANT EXECUTE ON dbo.usp_GetAgentTransactions   TO role_Analyst;
 GO
 
+
+------------------------------------
+-- PRIMARY SECTION 3: Data Protection
+-------------------------------------
 
 USE GreenAcresEMS;
 GO
@@ -1868,7 +1938,7 @@ IF NOT EXISTS (
 BEGIN
     
 /* ========================================================================
-   REQUIREMENT 5 & 6: HASH & ENCRYPTION
+   Assignment Requirement 5 & 6: HASH & ENCRYPTION
    ======================================================================== */
 CREATE SYMMETRIC KEY EMS_ClientDataSymmetricKey
     WITH ALGORITHM = AES_256
@@ -1915,11 +1985,14 @@ GO
 
 
 /* ========================================================================
-   PART 10: ENCRYPTING THE SENSITIVE COLUMNS
-   Runs before masking is applied, so it reads the real values rather than
-   encrypting the mask ("XXXXXX1234").
+   ORDER PART 10: ENCRYPTING THE SENSITIVE COLUMNS
+
+   -- Runs before masking is applied so real values are read instead of encrypting the mask ("XXXXXX1234")
    ======================================================================== */
+
+
 -- Populate the ciphertext columns from the existing plain values.
+
 OPEN SYMMETRIC KEY EMS_ClientDataSymmetricKey
 DECRYPTION BY CERTIFICATE EMS_DataProtectionCertificate;
 GO
@@ -1969,8 +2042,8 @@ GO
 CLOSE SYMMETRIC KEY EMS_ClientDataSymmetricKey;
 GO
 
--- Proof the load worked: ciphertext present on every row.
--- Expected: 50 encrypted rows for Clients, 17 for LeaseAgreements.
+-- Proof that the load worked with ciphertext present on every row.
+-- 50 encrypted rows for Clients & 17 for LeaseAgreements is expected.
 SELECT
     'Clients' AS TableName,
     COUNT(*)  AS TotalRows,
@@ -2017,8 +2090,7 @@ BEGIN
 END;
 GO
 
--- Forced-reset flag: 1 = still on the onboarding password. Added here, before
--- Part 11, because Part 11's proof query reads this column.
+-- Forced-reset flag: 1 = still on the onboarding password. Added here, before Part 11, because Part 11's proof query reads this column.
 IF COL_LENGTH('dbo.SystemUsers', 'PasswordMustChange') IS NULL
 BEGIN
     ALTER TABLE dbo.SystemUsers
@@ -2028,8 +2100,9 @@ GO
 
 
 /* ========================================================================
-   PART 11: PASSWORD SALTS AND SHA2_512 HASHES
-   A fresh 32-byte salt per account; the plain password is never stored.
+   ORDER PART 11: PASSWORD SALTS AND SHA2_512 HASHES
+   
+   -- A fresh 32-byte salt per account where the plain password is never stored.
    ======================================================================== */
 UPDATE dbo.SystemUsers
 SET PasswordSaltSecure = CRYPT_GEN_RANDOM(32)
@@ -2037,9 +2110,7 @@ WHERE PasswordSaltSecure IS NULL;
 GO
 
 
--- Every account is seeded with the SAME temporary password and is expected to
--- change it at first login (the PasswordMustChange column, added above, is
--- what enforces this).
+-- Every account is seeded with the same temporary password and is expected to change at first login (enforced by the PasswordMustChange column)
 UPDATE dbo.SystemUsers
 SET
     PasswordHashSecure = HASHBYTES(
@@ -2051,7 +2122,7 @@ SET
 WHERE PasswordHashSecure IS NULL;
 GO
 
--- Proof: no readable password anywhere, and every account has its own salt.
+-- Proof: No readable password anywhere and every account has its own salt.
 SELECT
     COUNT(*)                            AS TotalAccounts,
     COUNT(DISTINCT PasswordSaltSecure)  AS DistinctSalts,
@@ -2063,20 +2134,11 @@ FROM dbo.SystemUsers;
 GO
 
 
-/* ========================================================================
-   ------------------------------------------------------------------------
-   REMOVING THE OLD, WEAKER CREDENTIAL STORE The original developers stored
-   credentials in two columns: PasswordHash VARBINARY(64) --
-   HASHBYTES('SHA2_256', password + salt) PasswordSalt NVARCHAR(50) -- the salt,
-   in PLAIN TEXT Both are now superseded by PasswordHashSecure /
-   PasswordSaltSecure, and leaving them in place would be a real weakness, not
-   just clutter: * the salt sat next to the hash in a readable NVARCHAR column,
-   so anyone with SELECT on SystemUsers had everything needed to run an offline
-   dictionary attack; * SHA2_256 over a short salt is far cheaper to brute-force
-   than the SHA2_512 over a 32-byte CRYPT_GEN_RANDOM salt we use now; * two
-   credential stores for one account means an attacker simply attacks the weaker
-   one.
-   ======================================================================== */
+-- Dropping the old credential columns:
+-- PasswordHash/PasswordSalt stored the salt as plain text next to a SHA2_256 hash so those with SELECT on this table has everything needed for an offline dictionary attack. 
+-- Now that PasswordHashSecure/PasswordSaltSecure (SHA2_512 + a real random salt) are in place hence keeping the old columns acts as a weaker target to go for.
+
+
 IF COL_LENGTH('dbo.SystemUsers', 'PasswordHash') IS NOT NULL
 BEGIN
     ALTER TABLE dbo.SystemUsers DROP COLUMN PasswordHash;
@@ -2134,9 +2196,7 @@ END;
 GO
 
 
--- usp_VerifySystemUserPassword: Verifies an application-level login by re-
--- hashing the supplied password with the stored per-user salt and comparing the
--- digests.
+-- usp_VerifySystemUserPassword (Verifies an application-level login by re-hashing the supplied password with the stored per-user salt and comparing the digests)
 CREATE OR ALTER PROCEDURE dbo.usp_VerifySystemUserPassword
     @LoginName NVARCHAR(100),
     @PlainPassword NVARCHAR(200)
@@ -2159,7 +2219,7 @@ BEGIN
 
     IF @StoredSalt IS NULL OR @StoredHash IS NULL
     BEGIN
-        -- Unknown or deactivated account.
+        -- Unknown or deactivated account
         INSERT INTO dbo.UserLoginLog
             (SystemUserID, LoginName, IsSuccessful, HostName, FailureReason)
         VALUES
@@ -2186,9 +2246,7 @@ BEGIN
 
         DECLARE @LogID INT = SCOPE_IDENTITY();
 
-        -- Correct password, but still the shared onboarding secret: the
-        -- credential is valid yet must not be usable for real work until the
-        -- account owner replaces it.
+        -- Correct password but still the shared onboarding secret (the credential is valid yet must not be usable for real work until the account owner replaces it)
         IF EXISTS (SELECT 1 FROM dbo.SystemUsers
                    WHERE LoginName = @LoginName AND PasswordMustChange = 1)
         BEGIN
@@ -2229,8 +2287,8 @@ END;
 GO
 
 
--- usp_RecordLogout: Closes off a session row in UserLoginLog so the audit trail
--- shows how long each account was connected, not just when it arrived.
+-- usp_RecordLogout (Closes off a session row in UserLoginLog so the audit trail shows how long each account was connected and not just when it arrived)
+
 CREATE OR ALTER PROCEDURE dbo.usp_RecordLogout
     @LogID INT
 AS
@@ -2250,9 +2308,7 @@ END;
 GO
 
 
--- usp_ReportSuspiciousLogins: Detection query for the DBA: any account with 3
--- or more failed attempts inside a rolling window is reported as a possible
--- brute-force attempt.
+-- usp_ReportSuspiciousLogins (Detection query for the DBA where any account with 3 or more failed attempts inside a rolling window is reported as a possible brute-force attempt)
 CREATE OR ALTER PROCEDURE dbo.usp_ReportSuspiciousLogins
     @WindowMinutes  INT = 60,
     @FailThreshold  INT = 3
@@ -2277,9 +2333,20 @@ GO
 
 
 /* ========================================================================
-   PART 12: DYNAMIC DATA MASKING - 19 COLUMNS
-   Applied after encryption, so the encrypt step above saw real values.
+   ORDER PART 12: DYNAMIC DATA MASKING (19 COLUMNS)
+
+   -- Applied after encryption so the encrypt step above saw real values.
    ======================================================================== */
+
+/* ========================================================================
+   Assignment Requirement 7: MASKING
+   ======================================================================== */
+
+
+   -- CLIENTS TABLE
+   ------------------
+
+   -- 1. NRIC
 
 IF NOT EXISTS (
     SELECT 1
@@ -2290,12 +2357,15 @@ IF NOT EXISTS (
 BEGIN
     ALTER TABLE dbo.Clients
     ALTER COLUMN NRIC 
-/* ========================================================================
-   REQUIREMENT 7: MASKING
-   ======================================================================== */
+
+-- Masking
+
 ADD MASKED WITH (FUNCTION = 'partial(0, "XXXXXX", 4)');
 END;
 GO
+
+
+   -- 2. ContactNumber
 
 IF NOT EXISTS (
     SELECT 1
@@ -2306,12 +2376,15 @@ IF NOT EXISTS (
 BEGIN
     ALTER TABLE dbo.Clients
     ALTER COLUMN ContactNumber 
-/* ========================================================================
-   REQUIREMENT 7: MASKING
-   ======================================================================== */
+
+-- Masking
+
 ADD MASKED WITH (FUNCTION = 'partial(3, "XXXXXXX", 2)');
 END;
 GO
+
+
+   -- 3. Email
 
 IF NOT EXISTS (
     SELECT 1
@@ -2322,12 +2395,16 @@ IF NOT EXISTS (
 BEGIN
     ALTER TABLE dbo.Clients
     ALTER COLUMN Email 
-/* ========================================================================
-   REQUIREMENT 7: MASKING
-   ======================================================================== */
+
+
+-- Masking
+
 ADD MASKED WITH (FUNCTION = 'email()');
 END;
 GO
+
+
+   -- 4. Address
 
 IF NOT EXISTS (
     SELECT 1
@@ -2338,13 +2415,20 @@ IF NOT EXISTS (
 BEGIN
     ALTER TABLE dbo.Clients
     ALTER COLUMN Address 
-/* ========================================================================
-   REQUIREMENT 7: MASKING
-   ======================================================================== */
+
+
+-- Masking
+
 ADD MASKED WITH (FUNCTION = 'partial(8, "XXXXXXXXXX", 0)');
 END;
 GO
 
+
+
+   -- AGENTS TABLE
+   ------------------
+
+   -- 5. ContactNumber
 
 IF NOT EXISTS (
     SELECT 1
@@ -2355,12 +2439,17 @@ IF NOT EXISTS (
 BEGIN
     ALTER TABLE dbo.Agents
     ALTER COLUMN ContactNumber 
-/* ========================================================================
-   REQUIREMENT 7: MASKING
-   ======================================================================== */
+
+
+-- Masking
+
 ADD MASKED WITH (FUNCTION = 'partial(3, "XXXXXXX", 2)');
 END;
 GO
+
+
+   -- 6. Email
+
 
 IF NOT EXISTS (
     SELECT 1
@@ -2371,12 +2460,17 @@ IF NOT EXISTS (
 BEGIN
     ALTER TABLE dbo.Agents
     ALTER COLUMN Email 
-/* ========================================================================
-   REQUIREMENT 7: MASKING
-   ======================================================================== */
+
+
+-- Masking
+
 ADD MASKED WITH (FUNCTION = 'email()');
 END;
 GO
+
+
+   -- 7. CommissionRate
+
 
 IF NOT EXISTS (
     SELECT 1
@@ -2387,12 +2481,19 @@ IF NOT EXISTS (
 BEGIN
     ALTER TABLE dbo.Agents
     ALTER COLUMN CommissionRate 
-/* ========================================================================
-   REQUIREMENT 7: MASKING
-   ======================================================================== */
+
+
+-- Masking
+
 ADD MASKED WITH (FUNCTION = 'default()');
 END;
 GO
+
+
+   -- PROPERTIES TABLE
+   ------------------
+
+   -- 8. Address
 
 
 IF NOT EXISTS (
@@ -2404,12 +2505,15 @@ IF NOT EXISTS (
 BEGIN
     ALTER TABLE dbo.Properties
     ALTER COLUMN Address 
-/* ========================================================================
-   REQUIREMENT 7: MASKING
-   ======================================================================== */
+
+-- Masking
+
 ADD MASKED WITH (FUNCTION = 'partial(8, "XXXXXXXXXX", 0)');
 END;
 GO
+
+
+   -- 9. Price
 
 IF NOT EXISTS (
     SELECT 1
@@ -2420,12 +2524,20 @@ IF NOT EXISTS (
 BEGIN
     ALTER TABLE dbo.Properties
     ALTER COLUMN Price 
-/* ========================================================================
-   REQUIREMENT 7: MASKING
-   ======================================================================== */
+
+-- Masking
+
 ADD MASKED WITH (FUNCTION = 'random(100000, 1000000)');
 END;
 GO
+
+
+
+   -- TRANSACTIONS TABLE
+   ------------------
+
+
+   -- 10. Amount
 
 
 IF NOT EXISTS (
@@ -2437,13 +2549,20 @@ IF NOT EXISTS (
 BEGIN
     ALTER TABLE dbo.Transactions
     ALTER COLUMN Amount 
-/* ========================================================================
-   REQUIREMENT 7: MASKING
-   ======================================================================== */
+
+-- Masking
+
 ADD MASKED WITH (FUNCTION = 'random(1000, 100000)');
 END;
 GO
 
+
+
+   -- MAINTENANCE REQUESTS TABLE
+   ------------------------------
+
+
+   -- 11. EstimatedCost
 
 IF NOT EXISTS (
     SELECT 1
@@ -2454,12 +2573,15 @@ IF NOT EXISTS (
 BEGIN
     ALTER TABLE dbo.MaintenanceRequests
     ALTER COLUMN EstimatedCost 
-/* ========================================================================
-   REQUIREMENT 7: MASKING
-   ======================================================================== */
+
+-- Masking
+
 ADD MASKED WITH (FUNCTION = 'random(100, 10000)');
 END;
 GO
+
+
+   -- 12. ActualCost
 
 IF NOT EXISTS (
     SELECT 1
@@ -2470,13 +2592,19 @@ IF NOT EXISTS (
 BEGIN
     ALTER TABLE dbo.MaintenanceRequests
     ALTER COLUMN ActualCost 
-/* ========================================================================
-   REQUIREMENT 7: MASKING
-   ======================================================================== */
+
+
+-- Masking
+
 ADD MASKED WITH (FUNCTION = 'random(100, 10000)');
 END;
 GO
 
+   -- SYSTEM USERS TABLE
+   ------------------------------
+
+
+   -- 13. Email
 
 IF NOT EXISTS (
     SELECT 1
@@ -2487,13 +2615,18 @@ IF NOT EXISTS (
 BEGIN
     ALTER TABLE dbo.SystemUsers
     ALTER COLUMN Email 
-/* ========================================================================
-   REQUIREMENT 7: MASKING
-   ======================================================================== */
+
+-- Masking
+
 ADD MASKED WITH (FUNCTION = 'email()');
 END;
 GO
 
+
+   -- LEASE AGREEMENTS TABLE
+   ------------------------------
+
+   -- 14. MonthlyRent
 
 IF NOT EXISTS (
     SELECT 1
@@ -2504,12 +2637,16 @@ IF NOT EXISTS (
 BEGIN
     ALTER TABLE dbo.LeaseAgreements
     ALTER COLUMN MonthlyRent 
-/* ========================================================================
-   REQUIREMENT 7: MASKING
-   ======================================================================== */
+
+
+-- Masking
+
 ADD MASKED WITH (FUNCTION = 'random(1000, 10000)');
 END;
 GO
+
+
+   -- 15. SecurityDeposit
 
 IF NOT EXISTS (
     SELECT 1
@@ -2520,12 +2657,15 @@ IF NOT EXISTS (
 BEGIN
     ALTER TABLE dbo.LeaseAgreements
     ALTER COLUMN SecurityDeposit 
-/* ========================================================================
-   REQUIREMENT 7: MASKING
-   ======================================================================== */
+
+-- Masking
+
 ADD MASKED WITH (FUNCTION = 'random(1000, 20000)');
 END;
 GO
+
+
+   -- 16. AgreementDocPath
 
 IF NOT EXISTS (
     SELECT 1
@@ -2536,13 +2676,19 @@ IF NOT EXISTS (
 BEGIN
     ALTER TABLE dbo.LeaseAgreements
     ALTER COLUMN AgreementDocPath 
-/* ========================================================================
-   REQUIREMENT 7: MASKING
-   ======================================================================== */
+
+-- Masking
+
 ADD MASKED WITH (FUNCTION = 'partial(5, "XXXXXXXXXX", 4)');
 END;
 GO
 
+
+   -- COMMISSION PAYMENTS TABLE
+   ------------------------------
+
+
+   -- 17. CommissionRate
 
 IF NOT EXISTS (
     SELECT 1
@@ -2553,12 +2699,17 @@ IF NOT EXISTS (
 BEGIN
     ALTER TABLE dbo.CommissionPayments
     ALTER COLUMN CommissionRate 
-/* ========================================================================
-   REQUIREMENT 7: MASKING
-   ======================================================================== */
+
+-- Masking
+
 ADD MASKED WITH (FUNCTION = 'default()');
 END;
 GO
+
+
+
+   -- 18. CommissionAmount
+
 
 IF NOT EXISTS (
     SELECT 1
@@ -2569,12 +2720,18 @@ IF NOT EXISTS (
 BEGIN
     ALTER TABLE dbo.CommissionPayments
     ALTER COLUMN CommissionAmount 
-/* ========================================================================
-   REQUIREMENT 7: MASKING
-   ======================================================================== */
+
+-- Masking
+
 ADD MASKED WITH (FUNCTION = 'random(100, 100000)');
 END;
 GO
+
+
+   -- MAINTENANCE STAFF TABLE
+   ------------------------------
+
+   -- 19. ContactNumber
 
 
 IF NOT EXISTS (
@@ -2586,21 +2743,22 @@ IF NOT EXISTS (
 BEGIN
     ALTER TABLE dbo.MaintenanceStaff
     ALTER COLUMN ContactNumber
-/* ========================================================================
-   REQUIREMENT 7: MASKING
-   ======================================================================== */
+
+-- Masking
+
 ADD MASKED WITH (FUNCTION = 'partial(3, "XXXXXXX", 2)');
 END;
 GO
 
 
 /* ========================================================================
-   REQUIREMENT 7 (continued): MASKING - KNOWN LIMIT + ANALYST EXCEPTION
-   IMPORTANT LIMITATION, stated deliberately for the report: Dynamic Data
-   Masking is a PRESENTATION control, not a security boundary.
+   Assignment Requirement 7 (continuation): MASKING - KNOWN LIMIT + ANALYST EXCEPTION
+   
+   (Limitation: Stated purposely for the report where Dynamic Data Masking is merely presentation control not a security boundary)
    ======================================================================== */
--- Issued through sp_executesql so a SQL Server 2019 parser never sees the
--- 2022-only column-level UNMASK syntax and rejects the whole batch.
+
+-- Issued through sp_executesql so a SQL Server 2019 parser never sees the 2022-only column-level UNMASK syntax and rejects the whole batch.
+
 IF CAST(SERVERPROPERTY('ProductMajorVersion') AS INT) >= 16
 BEGIN
     PRINT 'SQL Server 2022+ detected: applying column-level UNMASK for role_Analyst.';
@@ -2612,9 +2770,7 @@ BEGIN
     EXEC sys.sp_executesql N'GRANT UNMASK ON dbo.CommissionPayments(CommissionRate)   TO role_Analyst;';
     EXEC sys.sp_executesql N'GRANT UNMASK ON dbo.LeaseAgreements(MonthlyRent)         TO role_Analyst;';
 
-    -- NOTE what is deliberately NOT granted: Clients.NRIC, Clients.Email,
-    -- Clients.ContactNumber, Clients.Address, Agents.ContactNumber,
-    -- Agents.Email, SystemUsers.Email, MaintenanceStaff.ContactNumber.
+    -- Deliberately NOT granted: Clients.NRIC, Clients.Email, Clients.ContactNumber, Clients.Address, Agents.ContactNumber, Agents.Email, SystemUsers.Email, MaintenanceStaff.ContactNumber
 END
 ELSE
 BEGIN
@@ -2625,16 +2781,15 @@ GO
 
 
 /* ========================================================================
-   REQUIREMENT 6 (continued): CONTROLLED DECRYPTION PATH
-   Encrypting the data is only half the job - the business still has to be able
-   to READ it.
+   Assignment Requirement 6 (continuation): CONTROLLED DECRYPTION PATH
+
+   (Encrypting data is only halfway as the business needs to read it)
    ======================================================================== */
 
--- usp_GetClientSensitiveData: Returns decrypted client PII for ONE client at a
--- time.
+-- usp_GetClientSensitiveData (Returns decrypted client PII for one client at a time)
 CREATE OR ALTER PROCEDURE dbo.usp_GetClientSensitiveData
     @ClientID INT,
-    @Reason   NVARCHAR(200) = NULL   -- purpose-of-access, written to AuditLog
+    @Reason   NVARCHAR(200) = NULL   -- purpose-of-access (written to AuditLog)
 WITH EXECUTE AS OWNER
 AS
 BEGIN
@@ -2652,7 +2807,7 @@ BEGIN
         RETURN;
     END;
 
-    -- Record WHO asked for decrypted PII and WHY, before handing it over.
+    -- Records who asked for decrypted PII and why before handing it over.
     INSERT INTO dbo.AuditLog
         (TableName, OperationType, RecordID, ChangedBy,
          NewValues, ApplicationName, HostName)
@@ -2683,8 +2838,7 @@ END;
 GO
 
 
--- usp_GetLeaseDocumentPath: Same pattern for the encrypted lease-document
--- location.
+-- usp_GetLeaseDocumentPath (Same pattern for the encrypted lease-document location)
 CREATE OR ALTER PROCEDURE dbo.usp_GetLeaseDocumentPath
     @LeaseID INT
 WITH EXECUTE AS OWNER
@@ -2716,8 +2870,7 @@ END;
 GO
 
 
--- usp_EncryptClientPII: Re-encrypts the sensitive columns for a client after an
--- INSERT/UPDATE.
+-- usp_EncryptClientPII (Re-encrypts the sensitive columns for a client after an INSERT/UPDATE)
 CREATE OR ALTER PROCEDURE dbo.usp_EncryptClientPII
     @ClientID INT = NULL       -- NULL = refresh every row that needs it
 WITH EXECUTE AS OWNER
@@ -2756,8 +2909,7 @@ END;
 GO
 
 
--- Who may decrypt? role_Admin - business owners of client data, needed for
--- daily service.
+-- Decryption: role_Admin (business owners of client data needed for daily service)
 GRANT EXECUTE ON dbo.usp_GetClientSensitiveData TO role_Admin;
 GRANT EXECUTE ON dbo.usp_GetClientSensitiveData TO role_DBA;
 GRANT EXECUTE ON dbo.usp_GetLeaseDocumentPath   TO role_Admin;
@@ -2768,7 +2920,7 @@ GRANT EXECUTE ON dbo.usp_RecordLogout           TO role_Admin;
 GRANT EXECUTE ON dbo.usp_ReportSuspiciousLogins TO role_DBA;
 GO
 
--- Explicit DENY on the decryption doors for the developer/reporting roles.
+-- Explicit DENY on the decryption doors for the developer & reporting roles
 DENY EXECUTE ON dbo.usp_GetClientSensitiveData TO role_PropMgmtDev;
 DENY EXECUTE ON dbo.usp_GetClientSensitiveData TO role_ClientPortalDev;
 DENY EXECUTE ON dbo.usp_GetClientSensitiveData TO role_Analyst;
@@ -2777,7 +2929,7 @@ DENY EXECUTE ON dbo.usp_GetLeaseDocumentPath   TO role_Analyst;
 DENY EXECUTE ON dbo.usp_GetLeaseDocumentPath   TO role_ReadOnly;
 GO
 
--- Ad-hoc key access for DBAs only.
+-- Ad-hoc key access for DBAs only
 GRANT VIEW DEFINITION ON SYMMETRIC KEY::EMS_ClientDataSymmetricKey TO role_DBA;
 GRANT CONTROL ON CERTIFICATE::EMS_DataProtectionCertificate        TO role_DBA;
 GO
@@ -2786,18 +2938,9 @@ PRINT 'Controlled decryption path created (procedures + grants).';
 GO
 
 
-/* ========================================================================
-   OPTIONAL HARDENING - REMOVING THE PLAINTEXT DUPLICATES
-   Each protected column exists twice (readable + ciphertext) so masking stays
-   demonstrable, which makes the encryption defence-in-depth rather than true
-   encryption-at-rest; un-comment below for the latter, then fix
-   vw_ClientDirectory, usp_ManageClient, the two masking blocks and tests
-   B2/C5/C6/C7. See README.md "Known limitations".
-   ------------------------------------------------------------------------
-   ALTER TABLE dbo.Clients         DROP COLUMN NRIC;
-   ALTER TABLE dbo.LeaseAgreements DROP COLUMN AgreementDocPath;
-   GO
-   ======================================================================== */
+------------------------------------
+-- PRIMARY SECTION 4: Auditing
+-------------------------------------
 
 
 USE master;
@@ -2811,9 +2954,12 @@ GO
 USE GreenAcresEMS;
 GO
 
--- PART 14: AUDIT TABLES, RETENTION AND AUDIT PERMISSIONS Green Acres Realty Sdn
--- Bhd - EMS Database Security CT069-3-3 Database Security Assignment Purpose:
--- 1. Create the central AuditLog table if it does not exist.
+/* ========================================================================
+-- ORDER PART 14: AUDIT TABLES, RETENTION AND AUDIT PERMISSIONS [EMS Database Security]
+
+-- Create the central AuditLog table if it does not exist.
+   ======================================================================== */
+
 
 USE GreenAcresEMS;
 GO
@@ -2836,7 +2982,7 @@ BEGIN
 END;
 GO
 
--- Index used by incident-history and date-range searches.
+-- Index used by incident-history and date-range searches
 IF NOT EXISTS (
     SELECT 1
     FROM sys.indexes
@@ -2850,7 +2996,7 @@ BEGIN
 END;
 GO
 
--- Older audit rows are moved here instead of being permanently deleted.
+-- Older audit rows are moved here instead of being permanently deleted
 IF OBJECT_ID('dbo.AuditLogArchive', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.AuditLogArchive (
@@ -2926,7 +3072,7 @@ BEGIN
 END;
 GO
 
--- Only DBA/Admin should read the audit trail directly.
+-- Only DBA & Admin should read the audit trail directly
 IF DATABASE_PRINCIPAL_ID('role_DBA') IS NOT NULL
 BEGIN
     GRANT SELECT ON dbo.AuditLog TO role_DBA;
@@ -2970,10 +3116,12 @@ BEGIN
 END;
 GO
 
+
+
 USE GreenAcresEMS;
 GO
 
--- Drop the database audit specification first if this script is re-run.
+-- Drop the database audit specification first if this script is re-run
 IF EXISTS (SELECT 1 FROM sys.database_audit_specifications WHERE name = 'GA_EMS_DatabaseAuditSpec')
 BEGIN
     ALTER DATABASE AUDIT SPECIFICATION GA_EMS_DatabaseAuditSpec WITH (STATE = OFF);
@@ -2998,15 +3146,13 @@ BEGIN
 END;
 GO
 
--- Created via the SQL Server service account, so the folder already has the
--- permissions CREATE SERVER AUDIT needs - a manually created folder often
--- does not, which is why this step used to fail silently downstream.
+-- Created via the SQL Server service account so the folder already has the permissions 'CREATE SERVER AUDIT' needs (a manually created folder often does not which is why this step used to fail silently downstream)
 EXEC master.dbo.xp_create_subdir 'C:\SQLAudit';
 GO
 
 
 /* ========================================================================
-   REQUIREMENT 9 & 10: SERVER & DATABASE AUDITING
+   Assignment Requirement 9 & 10: SERVER & DATABASE AUDITING
    ======================================================================== */
 CREATE SERVER AUDIT GA_EMS_ServerAudit
 TO FILE (
@@ -3078,15 +3224,14 @@ GO
 
 
 /* ========================================================================
-   REQUIREMENT 9 & 10 (continued): LOGIN HISTORY IN dbo.UserLoginLog
-   The Server Audit above writes to .sqlaudit FILES, which are excellent tamper-
-   resistant evidence but awkward to query from the application and impossible
-   to join to our own SystemUsers table.
+   Assignment Requirement 9 & 10 (continuation): LOGIN HISTORY IN dbo.UserLoginLog
+   
+   (The Server Audit above writes to .sqlaudit FILES which are excellent tamper-resistant evidence but awkward to query from the application and impossible to join to the SystemUsers table)
    ======================================================================== */
 USE master;
 GO
 
--- Drop first so this script stays re-runnable.
+-- Drop first so this script stays re-runnable
 IF EXISTS (SELECT 1 FROM sys.server_triggers WHERE name = 'trg_ServerLogon_AuditLogin')
 BEGIN
     DROP TRIGGER trg_ServerLogon_AuditLogin ON ALL SERVER;
@@ -3152,8 +3297,7 @@ GO
 USE GreenAcresEMS;
 GO
 
--- vw_ServerLoginAudit: Reads the FAILED and SUCCESSFUL login events straight
--- out of the audit files.
+-- vw_ServerLoginAudit (Reads the Failed and Successful login events straight out of the audit files)
 CREATE OR ALTER VIEW dbo.vw_ServerLoginAudit
 AS
     SELECT TOP 1000
@@ -3170,9 +3314,7 @@ AS
     ORDER BY event_time DESC;
 GO
 
--- vw_LoginHistory: The in-database login history, joined to the staff record
--- and department so the DBA can answer "who was connected, from where, and
--- when" without opening an audit file.
+-- vw_LoginHistory (The in-database login history joined to the staff record and department so the DBA can answer "who was connected, from where and when" without opening an audit file)
 CREATE OR ALTER VIEW dbo.vw_LoginHistory
 AS
     SELECT
@@ -3194,9 +3336,7 @@ AS
     LEFT JOIN dbo.Departments AS d  ON d.DepartmentID  = su.DepartmentID;
 GO
 
--- Login history is audit evidence: DBA and Admin may read it, the
--- developer/reporting roles may not (they could otherwise profile who works
--- when, and confirm which accounts exist).
+-- Login history is audit evidence: DBA and Admin may read it however the developer/reporting roles may not (they could otherwise profile who works when and confirm which accounts exist)
 GRANT SELECT ON dbo.vw_LoginHistory TO role_DBA;
 GRANT SELECT ON dbo.vw_LoginHistory TO role_Admin;
 GO
@@ -3216,9 +3356,11 @@ GO
 PRINT 'Auditing setup completed. Triggers are created next, then run DML.sql.';
 GO
 
--- PART 17: TRIGGERS - 8 AUDIT, 4 OPERATIONAL Green Acres Realty Sdn Bhd - EMS
--- Database Security Purpose: Create one set-based history trigger for each
--- important table.
+/* ========================================================================
+-- ORDER PART 17: TRIGGERS (8 AUDIT, 4 OPERATIONAL) [EMS Database Security]
+
+-- Create one set-based history trigger for each important table.
+   ======================================================================== */
 
 USE GreenAcresEMS;
 GO
@@ -3229,10 +3371,11 @@ GO
 
 
 /* ========================================================================
-   REQUIREMENT 11: TRIGGER (AUDITING & OPERATIONAL)
+   Assignment Requirement 11: TRIGGER (AUDITING & OPERATIONAL)
    ======================================================================== */
--- TRIGGER: trg_Clients_Audit
--- Writes an AuditLog row (before/after JSON) for every INSERT, UPDATE and DELETE on dbo.Clients.
+-- Trigger: trg_Clients_Audit
+-- Writes an AuditLog row (before/ after JSON) for every INSERT, UPDATE and DELETE on dbo.Clients
+
 CREATE OR ALTER TRIGGER dbo.trg_Clients_Audit
 ON dbo.Clients
 WITH EXECUTE AS OWNER
@@ -3282,8 +3425,8 @@ BEGIN
 END;
 GO
 
--- TRIGGER: trg_Agents_Audit
--- Writes an AuditLog row (before/after JSON) for every INSERT, UPDATE and DELETE on dbo.Agents.
+-- Trigger: trg_Agents_Audit
+-- Writes an AuditLog row (before/ after JSON) for every INSERT, UPDATE and DELETE on dbo.Agents
 CREATE OR ALTER TRIGGER dbo.trg_Agents_Audit
 ON dbo.Agents
 WITH EXECUTE AS OWNER
@@ -3333,8 +3476,8 @@ BEGIN
 END;
 GO
 
--- TRIGGER: trg_Transactions_Audit
--- Writes an AuditLog row (before/after JSON) for every INSERT, UPDATE and DELETE on dbo.Transactions.
+-- Trigger: trg_Transactions_Audit
+-- Writes an AuditLog row (before/ after JSON) for every INSERT, UPDATE and DELETE on dbo.Transactions
 CREATE OR ALTER TRIGGER dbo.trg_Transactions_Audit
 ON dbo.Transactions
 WITH EXECUTE AS OWNER
@@ -3384,8 +3527,8 @@ BEGIN
 END;
 GO
 
--- TRIGGER: trg_LeaseAgreements_Audit
--- Writes an AuditLog row (before/after JSON) for every INSERT, UPDATE and DELETE on dbo.LeaseAgreements.
+-- Trigger: trg_LeaseAgreements_Audit
+-- Writes an AuditLog row (before/ after JSON) for every INSERT, UPDATE and DELETE on dbo.LeaseAgreements
 CREATE OR ALTER TRIGGER dbo.trg_LeaseAgreements_Audit
 ON dbo.LeaseAgreements
 WITH EXECUTE AS OWNER
@@ -3435,8 +3578,8 @@ BEGIN
 END;
 GO
 
--- TRIGGER: trg_CommissionPayments_Audit
--- Writes an AuditLog row (before/after JSON) for every INSERT, UPDATE and DELETE on dbo.CommissionPayments.
+-- Trigger: trg_CommissionPayments_Audit
+-- Writes an AuditLog row (before/ after JSON) for every INSERT, UPDATE and DELETE on dbo.CommissionPayments
 CREATE OR ALTER TRIGGER dbo.trg_CommissionPayments_Audit
 ON dbo.CommissionPayments
 WITH EXECUTE AS OWNER
@@ -3486,11 +3629,9 @@ BEGIN
 END;
 GO
 
--- TRIGGER: trg_SystemUsers_Audit
--- Writes an AuditLog row for every INSERT, UPDATE and DELETE on dbo.SystemUsers, via an explicit column list.
--- Columns are listed one by one on purpose: every credential column
--- (PasswordHashSecure, PasswordSaltSecure, PasswordHashAlgorithm) is
--- deliberately excluded so hashes and salts never reach dbo.AuditLog.
+-- Trigger: trg_SystemUsers_Audit
+-- Writes an AuditLog row for every INSERT, UPDATE and DELETE on dbo.SystemUsers via an explicit column list.
+-- Columns are listed one by one on purpose: every credential column (PasswordHashSecure, PasswordSaltSecure, PasswordHashAlgorithm) is deliberately excluded so hashes and salts never reach dbo.AuditLog
 CREATE OR ALTER TRIGGER dbo.trg_SystemUsers_Audit
 ON dbo.SystemUsers
 WITH EXECUTE AS OWNER
@@ -3560,8 +3701,8 @@ BEGIN
 END;
 GO
 
--- TRIGGER: trg_MaintenanceRequests_Audit
--- Writes an AuditLog row (before/after JSON) for every INSERT, UPDATE and DELETE on dbo.MaintenanceRequests.
+-- Trigger: trg_MaintenanceRequests_Audit
+-- Writes an AuditLog row (before/ after JSON) for every INSERT, UPDATE and DELETE on dbo.MaintenanceRequests
 CREATE OR ALTER TRIGGER dbo.trg_MaintenanceRequests_Audit
 ON dbo.MaintenanceRequests
 WITH EXECUTE AS OWNER
@@ -3611,8 +3752,8 @@ BEGIN
 END;
 GO
 
--- TRIGGER: trg_Properties_Audit
--- Writes an AuditLog row (before/after JSON) for every INSERT, UPDATE and DELETE on dbo.Properties.
+-- Trigger: trg_Properties_Audit
+-- Writes an AuditLog row (before/ after JSON) for every INSERT, UPDATE and DELETE on dbo.Properties
 CREATE OR ALTER TRIGGER dbo.trg_Properties_Audit
 ON dbo.Properties
 WITH EXECUTE AS OWNER
@@ -3667,9 +3808,8 @@ PRINT 'Eight row-history audit triggers created successfully.';
 GO
 
 
--- TRIGGER: trg_Transactions_UpdatePropertyStatus
--- B1. New Transaction -> Property.Status: 'Sale' becomes Sold, 'Rent' becomes
---     Rented, so no dev team has to remember to do it in application code.
+-- Trigger: trg_Transactions_UpdatePropertyStatus
+-- New Transaction -> Property.Status: 'Sale' becomes Sold, 'Rent' becomes Rented so no dev team has to remember to do it in application code
 CREATE OR ALTER TRIGGER trg_Transactions_UpdatePropertyStatus
 ON dbo.Transactions
 AFTER INSERT
@@ -3689,9 +3829,8 @@ BEGIN
 END;
 GO
 
--- TRIGGER: trg_Transactions_AutoCommission
--- B2. New Transaction = auto-generate its CommissionPayments row, snapshotting
---     the agent's current CommissionRate at the time of the sale.
+-- Trigger: trg_Transactions_AutoCommission
+-- New Transaction = Auto-generate the CommissionPayments row snapshotting the agent's current CommissionRate at the time of the sale.
 CREATE OR ALTER TRIGGER trg_Transactions_AutoCommission
 ON dbo.Transactions
 AFTER INSERT
@@ -3714,9 +3853,8 @@ BEGIN
 END;
 GO
 
--- TRIGGER: trg_LeaseAgreements_StatusChange
--- B3. Lease Expired/Terminated = free up the Property (only if no other Active
---     lease holds it) and notify the client.
+-- Trigger: trg_LeaseAgreements_StatusChange
+-- Lease Expired/Terminated = Free up the Property (only if no other Active lease holds it) and notify the client
 CREATE OR ALTER TRIGGER trg_LeaseAgreements_StatusChange
 ON dbo.LeaseAgreements
 AFTER UPDATE
@@ -3727,8 +3865,7 @@ BEGIN
     IF NOT UPDATE(LeaseStatus)
         RETURN;
 
-    -- Free up the property when a lease ends, unless another active lease is
-    -- still keeping it occupied.
+    -- Free up the property when a lease ends unless another active lease is still keeping it occupied.
     UPDATE p
     SET p.Status = 'Available'
     FROM dbo.Properties p
@@ -3757,9 +3894,8 @@ BEGIN
 END;
 GO
 
--- TRIGGER: trg_MaintenanceRequests_AutoComplete
--- B4. Maintenance request Completed = stamp CompletedDate and notify the
---     client; direct recursion is off by default, so the self-UPDATE is safe.
+-- Trigger: trg_MaintenanceRequests_AutoComplete
+-- Maintenance request Completed = stamp CompletedDate and notify the client (direct recursion is off by default so the self-UPDATE is safe)
 CREATE OR ALTER TRIGGER trg_MaintenanceRequests_AutoComplete
 ON dbo.MaintenanceRequests
 AFTER UPDATE
@@ -3795,16 +3931,15 @@ GO
 
 
 /* ========================================================================
-   PART 18: BACKUPS AND RECOVERY
-   Last, so the .bak captures the finished database - every table, key,
-   audit object and trigger already exists by this point.
+   ORDER PART 18: BACKUPS AND RECOVERY (Part of Primary Section 3)
+   
+   -- Last, so the .bak captures the finished database since every table, key, audit object and trigger already exists by this point
    ======================================================================== */
 
 USE master;
 GO
 
--- Create the backup directory on disk (requires xp_cmdshell OR do this manually
--- in Windows Explorer).
+-- Create the backup directory on disk (requires xp_cmdshell OR done manually in Windows Explorer)
 EXEC master.dbo.xp_create_subdir 'C:\EMS_Backups';
 GO
 
@@ -3813,53 +3948,28 @@ EXEC master.dbo.xp_create_subdir 'C:\EMS_Backups\Keys';
 GO
 
 
-/* ========================================================================
-   REQUIREMENT 8 (part 1): BACKING UP THE KEY MATERIAL
-   Restore the .bak on another instance without the certificate and every
-   encrypted column is permanently unreadable, so the certificate, its private
-   key and the database master key are exported too - and must be stored
-   separately from the .bak files.
 
-   Each export is timestamped rather than overwriting a fixed filename.
-   GreenAcresEMS is dropped and rebuilt on every run, and CREATE CERTIFICATE /
-   CREATE MASTER KEY generate a fresh random key pair each time, so a fixed
-   name would either be refused outright (BACKUP CERTIFICATE and BACKUP
-   MASTER KEY have no INIT/FORMAT-style overwrite option, unlike BACKUP
-   DATABASE) or, if it could be forced, would silently discard the only key
-   material able to decrypt an earlier run's .bak. If more than one
-   GreenAcresEMS_FULL.bak exists, match its timestamp to the key files with
-   the same timestamp; day to day, the newest-timestamped files are the ones
-   that matter.
+-- Backing up the key material:
+-- The .bak alone isn't enough because without the certificate its private key and the master key together with every encrypted column stays permanently unreadable.
+-- All three get exported and should be kept separate from the .bak files.
 
-   RECOVERY ON A NEW INSTANCE - the order matters:
-     RESTORE DATABASE GreenAcresEMS FROM DISK = '...FULL.bak' WITH ...;
-     USE GreenAcresEMS;
-     -- if the master key did not come across, restore it first:
-     RESTORE MASTER KEY FROM FILE = 'C:\EMS_Backups\Keys\EMS_MasterKey_<timestamp>.key'
-         DECRYPTION BY PASSWORD = '<the export password below>'
-         ENCRYPTION BY PASSWORD = '<new DMK password>';
-     OPEN MASTER KEY DECRYPTION BY PASSWORD = '<new DMK password>';
-     -- then the certificate, if it is missing:
-     CREATE CERTIFICATE EMS_DataProtectionCertificate
-         FROM FILE = 'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate_<timestamp>.cer'
-         WITH PRIVATE KEY (
-             FILE = 'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate_<timestamp>.pvk',
-             DECRYPTION BY PASSWORD = '<the export password below>');
-   ======================================================================== */
+
+-- Filenames are timestamped instead of fixed. 
+-- GreenAcresEMS gets rebuilt with a fresh key pair on every run and BACKUP CERTIFICATE/MASTER KEY can't overwrite an existing file 
+-- This is because it would wipe out the only key able to decrypt an earlier backup. 
+-- If more than one .bak exists then just match timestamps between the backup and its key files.
+
+
 USE GreenAcresEMS;
 GO
 
--- The master key must be open before it can be exported.
+-- The master key must be open before it can be exported
 OPEN MASTER KEY DECRYPTION BY PASSWORD = 'EMS_MasterKey_StrongPassword_2026!';
 GO
 
--- Build this run's timestamped export filenames. BACKUP CERTIFICATE and
--- BACKUP MASTER KEY's TO FILE / FILE clauses require a literal path, not a
--- variable (Msg 102/319 if you try), so the filenames are woven into
--- dynamic SQL text below instead of used directly. That's safe without the
--- quote-escaping @Password needs elsewhere in this script, because
--- FORMAT(..., 'yyyyMMdd_HHmmss') can only ever produce digits and
--- underscores - there is no way for it to contain a quote to break out with.
+-- Build this run's timestamped export filenames. 
+-- BACKUP CERTIFICATE and BACKUP MASTER KEY's TO FILE / FILE clauses require a literal path and not a variable so the filenames are woven into dynamic SQL text below instead of used directly. 
+-- Safe without the quote-escaping @Password needs elsewhere in this script because FORMAT(..., 'yyyyMMdd_HHmmss') can only ever produce digits and underscores (no way to contain a quote to break out with)
 DECLARE @KeyStamp   NVARCHAR(20)  = FORMAT(GETDATE(), 'yyyyMMdd_HHmmss');
 DECLARE @CerFile    NVARCHAR(300) = N'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate_' + @KeyStamp + N'.cer';
 DECLARE @PvkFile    NVARCHAR(300) = N'C:\EMS_Backups\Keys\EMS_DataProtectionCertificate_' + @KeyStamp + N'.pvk';
@@ -3895,25 +4005,25 @@ GO
 
 
 /* ========================================================================
-   REQUIREMENT 8 (part 2): DATABASE BACKUPS
+   Assignment Requirement 8 (Part 2): DATABASE BACKUPS
    ======================================================================== */
 BACKUP DATABASE GreenAcresEMS
 TO DISK = 'C:\EMS_Backups\GreenAcresEMS_FULL.bak'
 WITH
-    FORMAT,                         -- overwrite / create a fresh media set
-    INIT,                           -- overwrite existing backup sets
+    FORMAT,                         -- Overwrite / Create a fresh media set
+    INIT,                           -- Overwrite existing backup sets
     NAME = 'GreenAcresEMS-Full Database Backup',
     DESCRIPTION = 'Weekly full baseline backup of the EMS database',
-    COMPRESSION,                    -- smaller backup file (Standard/Enterprise)
-    CHECKSUM,                       -- detect I/O corruption during backup
-    STATS = 10;                     -- progress reported every 10%
+    COMPRESSION,                    -- Smaller backup file (Standard/Enterprise)
+    CHECKSUM,                       -- Detect I/O corruption during backup
+    STATS = 10;                     -- Progress reported every 10%
 GO
 
 
 /* ========================================================================
-   REQUIREMENT 8 (part 2 continued): DIFFERENTIAL BACKUP
-   Captures only what changed since the last FULL backup, so the daily window
-   stays short.
+   Assignment Requirement 8 (Part 2 - Continuation): DIFFERENTIAL BACKUP 
+   
+   (Captures only what changed since the last FULL backup so the daily window stays short)
    ======================================================================== */
 BACKUP DATABASE GreenAcresEMS
 TO DISK = 'C:\EMS_Backups\GreenAcresEMS_DIFF.bak'
@@ -3971,14 +4081,14 @@ GO
 
 
 /* ========================================================================
-   REQUIREMENT 8 (part 3): PROVING THE RESTORE ACTUALLY WORKS
-   An untested backup is only a hope.
+   Assignment Requirement 8 (Part 3): PROVING THE RESTORE ACTUALLY WORKS
+   
+   (An untested backup is only a hope)
    ======================================================================== */
 USE master;
 GO
 
--- Discover where this instance keeps its data files, so the MOVE below works on
--- any machine instead of a hard-coded C:\Program Files\...
+-- Discover where this instance keeps its data files so the MOVE below works on any machine instead of a hard-coded 'C:\Program Files\...'
 DECLARE @DataPath NVARCHAR(500) = CAST(SERVERPROPERTY('InstanceDefaultDataPath') AS NVARCHAR(500));
 DECLARE @LogPath  NVARCHAR(500) = CAST(SERVERPROPERTY('InstanceDefaultLogPath')  AS NVARCHAR(500));
 PRINT 'Data path : ' + ISNULL(@DataPath, '(unknown)');
@@ -3995,8 +4105,7 @@ BEGIN
 END;
 GO
 
--- Step 1 of 3: restore the FULL backup, leaving the copy offline (NORECOVERY)
--- so the differential can follow.
+-- Step 1: Restore the FULL backup leaving the copy offline (NORECOVERY) so the differential can follow.
 DECLARE @DataPath NVARCHAR(500) = CAST(SERVERPROPERTY('InstanceDefaultDataPath') AS NVARCHAR(500));
 DECLARE @LogPath  NVARCHAR(500) = CAST(SERVERPROPERTY('InstanceDefaultLogPath')  AS NVARCHAR(500));
 DECLARE @sql      NVARCHAR(MAX);
@@ -4015,13 +4124,13 @@ PRINT @sql;
 EXEC sys.sp_executesql @sql;
 GO
 
--- Step 2 of 3: apply the DIFFERENTIAL, still NORECOVERY.
+-- Step 2: Apply the DIFFERENTIAL (still NORECOVERY)
 RESTORE DATABASE GreenAcresEMS_Restore
 FROM DISK = 'C:\EMS_Backups\GreenAcresEMS_DIFF.bak'
 WITH NORECOVERY, STATS = 10;
 GO
 
--- Step 3 of 3: apply the LOG and bring the database online.
+-- Step 3: Apply the LOG and bring the database online.
 RESTORE LOG GreenAcresEMS_Restore
 FROM DISK = 'C:\EMS_Backups\GreenAcresEMS_LOG.trn'
 WITH RECOVERY, STATS = 10;
@@ -4030,7 +4139,7 @@ GO
 PRINT 'Restore rehearsal complete: GreenAcresEMS_Restore is online.';
 GO
 
--- Post-restore verification: does the recovered copy actually hold the data?
+-- Post-restore verification: Does the recovered copy actually hold the data?
 SELECT 'Properties'  AS TableName,
        (SELECT COUNT(*) FROM GreenAcresEMS.dbo.Properties)          AS LiveRows,
        (SELECT COUNT(*) FROM GreenAcresEMS_Restore.dbo.Properties)  AS RestoredRows
@@ -4052,7 +4161,7 @@ SELECT 'CommissionPayments',
        (SELECT COUNT(*) FROM GreenAcresEMS_Restore.dbo.CommissionPayments);
 GO
 
--- Confirm the encrypted data survived the restore as ciphertext.
+-- Confirms the encrypted data survived the restore as ciphertext
 SELECT TOP 3
     ClientID,
     FullName,
@@ -4061,37 +4170,31 @@ FROM GreenAcresEMS_Restore.dbo.Clients;
 GO
 
 
-/* ========================================================================
-   POINT-IN-TIME RECOVERY (the "someone deleted the wrong rows" scenario)
-   FULL recovery model plus log backups let us roll forward to a specific
-   second, stopping just before a mistake; documented rather than executed
-   because STOPAT needs a real timestamp and step 3 takes the live database
-   offline. Run one block at a time.
 
-   1. Note the time now - this is our "known good" point:
-          SELECT GETDATE() AS KnownGoodTime;
+-- Point-in-time recovery (the "someone deleted the wrong rows" scenario):
+-- FULL recovery model + log backups allows a roll forward to a specific second right before the mistake. 
+-- Documented rather than run here since STOPAT needs a real timestamp and step 3 makes the live DB offline.
 
-   2. Simulate the accident on the live database, e.g.
-          UPDATE dbo.Properties SET Price = 1 WHERE PropertyID <= 5;
+-- STEPS (Run one block at a time):
 
-   3. Take a tail-log backup so nothing committed is lost:
-          BACKUP LOG GreenAcresEMS
-          TO DISK = 'C:\EMS_Backups\GreenAcresEMS_TAIL.trn'
-          WITH NORECOVERY, NAME = 'Tail-log before point-in-time recovery';
+-- 1. Note the current time as the 'known good' point:
+--        SELECT GETDATE() AS KnownGoodTime.
+-- 2. Simulate the accident like:
+--        UPDATE dbo.Properties SET Price = 1 WHERE PropertyID <= 5.
+-- 3. Take a tail-log backup so nothing committed gets lost:
+--        BACKUP LOG GreenAcresEMS
+--        TO DISK = 'C:\EMS_Backups\GreenAcresEMS_TAIL.trn'
+--        WITH NORECOVERY, NAME = 'Tail-log before point-in-time recovery'.
+-- 4. Restore the full backup with NORECOVERY then roll the log forward only as far as the known-good time:
+--        RESTORE LOG GreenAcresEMS_Restore
+--        FROM DISK = 'C:\EMS_Backups\GreenAcresEMS_LOG.trn'
+--        WITH STOPAT = '2026-07-30 14:35:00', RECOVERY.
+-- 5. Verify the rows are back to normal then copy the corrected rows across or rename the databases to swap them.
 
-   4. Restore the full backup with NORECOVERY (as in Step 1 above), then
-      roll the log forward only as far as the known-good time:
-          RESTORE LOG GreenAcresEMS_Restore
-          FROM DISK = 'C:\EMS_Backups\GreenAcresEMS_LOG.trn'
-          WITH STOPAT = '2026-07-30 14:35:00', RECOVERY;
 
-   5. Verify the rows are back to their pre-accident values, then copy the
-      corrected rows across, or rename the databases to swap them.
-   ======================================================================== */
+-- COPY_ONLY backup: An ad-hoc backup (before a risky deployment) that does not reset the differential base so the scheduled backup chain above keeps working normally
 
--- COPY_ONLY backup: an ad-hoc backup (before a risky deployment, say) that does
--- NOT reset the differential base, so the scheduled backup chain above keeps
--- working normally.
+
 BACKUP DATABASE GreenAcresEMS
 TO DISK = 'C:\EMS_Backups\GreenAcresEMS_COPYONLY.bak'
 WITH COPY_ONLY, INIT, CHECKSUM, COMPRESSION,
@@ -4099,11 +4202,11 @@ WITH COPY_ONLY, INIT, CHECKSUM, COMPRESSION,
      DESCRIPTION = 'Taken before a change; does not break the differential chain';
 GO
 
--- Corruption watch: this table should always be EMPTY.
+-- Corruption watch: This table should always be EMPTY
 SELECT * FROM msdb.dbo.suspect_pages;
 GO
 
--- Confirm the recovery model is still FULL.
+-- Confirm the recovery model is still FULL
 SELECT
     name             AS DatabaseName,
     recovery_model_desc,
@@ -4118,8 +4221,9 @@ GO
 
 
 /* ========================================================================
-   PART 19: BUILD VERIFICATION
-   Screenshot-friendly confirmation that everything above is in place.
+   ORDER PART 19: BUILD VERIFICATION
+   
+   -- Screenshot-friendly confirmation that everything above is in place.
    ======================================================================== */
 
 USE GreenAcresEMS;
@@ -4141,7 +4245,7 @@ SELECT name FROM sys.views WHERE name LIKE 'vw_%';
 -- Procedures created
 SELECT name FROM sys.procedures WHERE name LIKE 'usp_%';
 GO
--- D. Quick status check for screenshot evidence
+-- Quick status check for screenshot evidence
 SELECT
     name AS ServerAuditName,
     is_state_enabled AS IsEnabled,
@@ -4177,7 +4281,7 @@ WHERE tr.name IN (
 ORDER BY TableName;
 GO
 
--- Full object inventory, one row per object type, for the report.
+-- Full object inventory with one row per object type for the report.
 SELECT 'Tables'            AS ObjectType, COUNT(*) AS Total FROM sys.tables
 UNION ALL SELECT 'Views',                 COUNT(*) FROM sys.views
 UNION ALL SELECT 'Stored Procedures',     COUNT(*) FROM sys.procedures
@@ -4192,14 +4296,11 @@ PRINT 'Data load, protection, backup and verification complete.';
 PRINT 'Section 7 below runs the full test suite.';
 GO
 
--- The seed load must have produced no audit rows: it ran before the triggers
--- existed. Expected: 0.
+-- The seed load must have produced no audit rows (it ran before the triggers existed) (Expected: 0)
 SELECT COUNT(*) AS AuditRowsFromBuild_ShouldBeZero FROM dbo.AuditLog;
 GO
 
--- Commission rows must come only from the seed data, never from the
--- auto-commission trigger firing during the load.
--- Expected: TransactionsWithCommission = 50, DuplicateCommissions = 0.
+-- Commission rows must come only from the seed data and not from the auto-commission trigger firing during the load (Expected: TransactionsWithCommission = 50, DuplicateCommissions = 0)
 SELECT
     (SELECT COUNT(DISTINCT TransactionID) FROM dbo.CommissionPayments) AS TransactionsWithCommission,
     (SELECT COUNT(*) FROM (

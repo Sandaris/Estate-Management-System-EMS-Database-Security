@@ -3240,9 +3240,12 @@ END;
 GO
 
 
+-- Only create the trigger if we can impersonate 'sa' to do the write.
 IF EXISTS (SELECT 1 FROM sys.server_principals WHERE name = 'sa' AND type = 'S')
 BEGIN
     EXEC('
+    -- Trigger: trg_ServerLogon_AuditLogin
+    -- Records every successful server login by an EMS-known account into dbo.UserLoginLog
     CREATE TRIGGER trg_ServerLogon_AuditLogin
     ON ALL SERVER
     WITH EXECUTE AS ''sa''
